@@ -1,70 +1,45 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server'
+import { getById, update, count, getAll } from '@/lib/firestore'
 
-// PUT /api/maintenance/[id] - Update maintenance record
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
-    const body = await request.json();
-
-    const existing = await db.maintenance.findUnique({ where: { id } });
+    const { id } = await params
+    const existing = await getById('maintenance', id)
     if (!existing) {
-      return NextResponse.json(
-        { success: false, error: 'Maintenance record not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: 'Maintenance tidak ditemukan' }, { status: 404 })
     }
 
-    const maintenance = await db.maintenance.update({
-      where: { id },
-      data: {
-        type: body.type ?? existing.type,
-        description: body.description !== undefined ? body.description : existing.description,
-        cost: body.cost ?? existing.cost,
-        dueDate: body.dueDate ? new Date(body.dueDate) : existing.dueDate,
-        completedDate: body.completedDate ? new Date(body.completedDate) : existing.completedDate,
-        status: body.status ?? existing.status,
-      },
-      include: {
-        vehicle: { select: { id: true, brand: true, model: true, plateNumber: true, status: true } },
-      },
-    });
+    const body = await request.json()
+    const { status, completedDate } = body
 
-    // If completed, check if vehicle can be set back to available
-    if (body.status === 'COMPLETED') {
-      const pendingMaintenance = await db.maintenance.count({
-        where: {
-          vehicleId: existing.vehicleId,
-          status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
-          id: { not: id },
-        },
-      });
+    const updates: Record<string, unknown> = {}
+    if (body.type !== undefined) updates.type = body.type
+    if (body.description !== undefined) updates.description = body.description
+    if (body.cost !== undefined) updates.cost = body.cost
+    if (body.dueDate !== undefined) updates.dueDate = body.dueDate
+    if (status !== undefined) updates.status = status
+    if (completedDate !== undefined) updates.completedDate = completedDate
 
-      if (pendingMaintenance === 0) {
-        await db.vehicle.update({
-          where: { id: existing.vehicleId },
-          data: { status: 'AVAILABLE' },
-        });
+    await update('maintenance', id, updates)
+
+    if (status && existing.vehicleId) {
+      if (status === 'COMPLETED') {
+        const remainingMaintenance = await getAll('maintenance', { where: { vehicleId: ['==', existing.vehicleId] } })
+        const hasActive = remainingMaintenance.some((m: Record<string, unknown>) =>
+          m.id !== id && (m.status === 'IN_PROGRESS' || m.status === 'SCHEDULED')
+        )
+        if (!hasActive) {
+          await update('vehicles', existing.vehicleId as string, { status: 'AVAILABLE' })
+        }
+      } else if (status === 'IN_PROGRESS') {
+        await update('vehicles', existing.vehicleId as string, { status: 'MAINTENANCE' })
       }
     }
 
-    // If in progress, set vehicle to maintenance
-    if (body.status === 'IN_PROGRESS') {
-      await db.vehicle.update({
-        where: { id: existing.vehicleId },
-        data: { status: 'MAINTENANCE' },
-      });
-    }
-
-    return NextResponse.json({ success: true, data: maintenance });
+    const record = await getById('maintenance', id)
+    return NextResponse.json({ success: true, data: record })
   } catch (error) {
-    console.error('Maintenance PUT error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to update maintenance record' },
-      { status: 500 }
-    );
+    console.error('Maintenance update error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal mengupdate maintenance' }, { status: 500 })
   }
 }

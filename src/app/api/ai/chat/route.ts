@@ -1,113 +1,50 @@
-import { NextRequest, NextResponse } from 'next/server';
-import ZAI from 'z-ai-web-dev-sdk';
-import { db } from '@/lib/db';
-
-const SYSTEM_PROMPT = `You are a helpful customer service chatbot for Qia Trans Manajemen, a transportation and car rental company in Indonesia. Help customers with booking inquiries, vehicle information, pricing, and general questions. Always respond in Indonesian unless the customer uses another language.
-
-Key information about Qia Trans Manajemen:
-- We offer various vehicle categories: SUV, SEDAN, MPV, HATCHBACK, VAN, PICKUP, LUXURY
-- Popular brands: Toyota, Honda, Mitsubishi, Suzuki, Daihatsu
-- We provide both self-drive and with-driver options
-- Payment methods: QRIS, Bank Transfer, E-Wallet, Cash
-- We offer daily, weekly, and monthly rental rates
-- All vehicles are well-maintained and insured
-
-When asked about pricing, mention that rates vary by vehicle type and duration. Suggest customers check our website for current rates or contact our team.
-When asked about availability, suggest checking online or contacting customer service.
-Be friendly, professional, and concise.`;
+import { NextRequest, NextResponse } from 'next/server'
+import { getAll, getById, create } from '@/lib/firestore'
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { message, conversationHistory = [], userId } = body;
-
+    const { message, userId } = await request.json()
     if (!message) {
-      return NextResponse.json(
-        { success: false, error: 'Message is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'Pesan wajib diisi' }, { status: 400 })
     }
 
-    // Fetch some context from the database (available vehicles, popular ones)
-    let contextInfo = '';
-    try {
-      const [availableVehicles, popularCategories] = await Promise.all([
-        db.vehicle.findMany({
-          where: { status: 'AVAILABLE' },
-          select: { brand: true, model: true, category: true, dailyRate: true, seats: true },
-          take: 10,
-        }),
-        db.booking.groupBy({
-          by: ['vehicleId'],
-          _count: { id: true },
-          orderBy: { _count: { id: 'desc' } },
-          take: 5,
-        }),
-      ]);
+    const [vehicles, bookings] = await Promise.all([
+      getAll('vehicles', { where: { status: ['==', 'AVAILABLE'] } }),
+      getAll('bookings'),
+    ])
 
-      if (availableVehicles.length > 0) {
-        contextInfo += `\n\nKendaraan yang tersedia saat ini:\n`;
-        availableVehicles.forEach((v) => {
-          contextInfo += `- ${v.brand} ${v.model} (${v.category}) - Rp ${v.dailyRate.toLocaleString('id-ID')}/hari, ${v.seats} kursi\n`;
-        });
+    const categoryCount: Record<string, number> = {}
+    bookings.forEach((b: Record<string, unknown>) => {
+      const booking = vehicles.find((v: Record<string, unknown>) => v.id === b.vehicleId)
+      if (booking) {
+        const cat = booking.category as string || 'Other'
+        categoryCount[cat] = (categoryCount[cat] || 0) + 1
       }
-    } catch {
-      // If DB query fails, continue without context
-    }
+    })
 
-    const zai = await ZAI.create();
+    const availableCategories = [...new Set(vehicles.map((v: Record<string, unknown>) => v.category))]
+    const contextInfo = `Tersedia ${vehicles.length} kendaraan dari ${availableCategories.length} kategori (${availableCategories.join(', ')}). Total ${bookings.length} booking tercatat.`
 
-    // Build messages array
-    const messages: Array<{ role: string; content: string }> = [
-      {
-        role: 'system',
-        content: SYSTEM_PROMPT + contextInfo,
-      },
-      // Add conversation history (limit to last 10 messages)
-      ...conversationHistory.slice(-10),
-      {
-        role: 'user',
-        content: message,
-      },
-    ];
+    const { default: ZAI } = await import('z-ai-web-dev-sdk')
+    const zai = await ZAI.create()
+    const completion = await zai.chat.completions.create({
+      messages: [
+        { role: 'system', content: `Kamu adalah asisten AI untuk Qia Trans Manajemen, sistem manajemen transportasi. ${contextInfo} Jawab dalam bahasa Indonesia dengan singkat dan membantu.` },
+        { role: 'user', content: message },
+      ],
+    })
 
-    const response = await zai.chat.completions.create({
-      messages: messages as any,
-      temperature: 0.7,
-      max_tokens: 500,
-    });
+    const reply = completion.choices[0]?.message?.content || 'Maaf, saya tidak dapat menjawab saat ini.'
 
-    const assistantMessage = response.choices?.[0]?.message?.content || 'Maaf, saya tidak dapat memproses permintaan Anda saat ini. Silakan coba lagi.';
-
-    // Log the chat for analytics (optional)
     if (userId) {
       try {
-        await db.notification.create({
-          data: {
-            userId,
-            title: 'Chat AI',
-            message: `Pertanyaan: ${message.substring(0, 100)}`,
-            type: 'BOOKING',
-            isRead: true,
-          },
-        });
-      } catch {
-        // Ignore logging errors
-      }
+        await create('notifications', { userId, title: 'Pesan AI', message: `Anda bertanya: ${message.substring(0, 50)}...`, type: 'PROMO', isRead: false })
+      } catch {}
     }
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        message: assistantMessage,
-        timestamp: new Date(),
-      },
-    });
+    return NextResponse.json({ success: true, data: { reply } })
   } catch (error) {
-    console.error('AI Chat error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to process chat message' },
-      { status: 500 }
-    );
+    console.error('AI chat error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal memproses pesan' }, { status: 500 })
   }
 }

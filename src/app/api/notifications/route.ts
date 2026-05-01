@@ -1,86 +1,57 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server'
+import { getAll, count, updateWhere } from '@/lib/firestore'
 
-// GET /api/notifications - List notifications for user
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId');
-    const type = searchParams.get('type');
-    const isRead = searchParams.get('isRead');
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get('userId')
+    const type = searchParams.get('type')
+    const isRead = searchParams.get('isRead')
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = parseInt(searchParams.get('limit') || '10')
 
     if (!userId) {
-      return NextResponse.json(
-        { success: false, error: 'userId is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'userId wajib diisi' }, { status: 400 })
     }
 
-    const where: Record<string, unknown> = { userId };
-    if (type) where.type = type;
-    if (isRead !== null && isRead !== '') {
-      where.isRead = isRead === 'true';
+    let notifications = await getAll('notifications', { where: { userId: ['==', userId] }, orderBy: 'createdAt', orderDir: 'desc' })
+
+    if (type) notifications = notifications.filter((n: Record<string, unknown>) => n.type === type)
+    if (isRead !== null && isRead !== undefined && isRead !== '') {
+      const val = isRead === 'true'
+      notifications = notifications.filter((n: Record<string, unknown>) => n.isRead === val)
     }
 
-    const [notifications, total, unreadCount] = await Promise.all([
-      db.notification.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      db.notification.count({ where }),
-      db.notification.count({ where: { userId, isRead: false } }),
-    ]);
+    const unreadCount = notifications.filter((n: Record<string, unknown>) => n.isRead === false).length
+
+    const total = notifications.length
+    const totalPages = Math.ceil(total / limit)
+    const start = (page - 1) * limit
+    const paginated = notifications.slice(start, start + limit)
 
     return NextResponse.json({
       success: true,
-      data: notifications,
+      data: paginated,
+      pagination: { page, limit, total, totalPages },
       unreadCount,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
+    })
   } catch (error) {
-    console.error('Notifications GET error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch notifications' },
-      { status: 500 }
-    );
+    console.error('Notifications list error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal memuat notifikasi' }, { status: 500 })
   }
 }
 
-// PUT /api/notifications - Mark all notifications as read for a user
 export async function PUT(request: NextRequest) {
   try {
-    const body = await request.json();
-
-    if (!body.userId) {
-      return NextResponse.json(
-        { success: false, error: 'userId is required' },
-        { status: 400 }
-      );
+    const { userId } = await request.json()
+    if (!userId) {
+      return NextResponse.json({ success: false, error: 'userId wajib diisi' }, { status: 400 })
     }
 
-    await db.notification.updateMany({
-      where: { userId: body.userId, isRead: false },
-      data: { isRead: true },
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: 'All notifications marked as read',
-    });
+    const updated = await updateWhere('notifications', 'userId', userId, { isRead: true })
+    return NextResponse.json({ success: true, message: `${updated} notifikasi ditandai sudah dibaca` })
   } catch (error) {
-    console.error('Notifications PUT error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to update notifications' },
-      { status: 500 }
-    );
+    console.error('Notifications update error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal mengupdate notifikasi' }, { status: 500 })
   }
 }

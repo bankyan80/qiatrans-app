@@ -1,110 +1,66 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server'
+import { getAll, count, create, getById } from '@/lib/firestore'
 
-// GET /api/payments - List payments
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status');
-    const bookingId = searchParams.get('bookingId');
-    const method = searchParams.get('method');
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const sortBy = searchParams.get('sortBy') || 'createdAt';
-    const sortOrder = searchParams.get('sortOrder') || 'desc';
+    const { searchParams } = new URL(request.url)
+    const status = searchParams.get('status')
+    const bookingId = searchParams.get('bookingId')
+    const method = searchParams.get('method')
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = parseInt(searchParams.get('limit') || '10')
 
-    const where: Record<string, unknown> = {};
-    if (status) where.status = status;
-    if (bookingId) where.bookingId = bookingId;
-    if (method) where.method = method;
+    let payments = await getAll('payments', { orderBy: 'createdAt', orderDir: 'desc' })
 
-    const orderBy: Record<string, string> = { [sortBy]: sortOrder };
+    if (status) payments = payments.filter((p: Record<string, unknown>) => p.status === status)
+    if (bookingId) payments = payments.filter((p: Record<string, unknown>) => p.bookingId === bookingId)
+    if (method) payments = payments.filter((p: Record<string, unknown>) => p.method === method)
 
-    const [payments, total] = await Promise.all([
-      db.payment.findMany({
-        where,
-        orderBy,
-        skip: (page - 1) * limit,
-        take: limit,
-        include: {
-          booking: {
-            select: {
-              id: true,
-              totalPrice: true,
-              status: true,
-              customer: { select: { id: true, name: true, email: true } },
-              vehicle: { select: { id: true, brand: true, model: true, plateNumber: true } },
-            },
-          },
-        },
-      }),
-      db.payment.count({ where }),
-    ]);
+    const total = payments.length
+    const totalPages = Math.ceil(total / limit)
+    const start = (page - 1) * limit
+    const paginated = payments.slice(start, start + limit)
+
+    const enriched = await Promise.all(
+      paginated.map(async (payment: Record<string, unknown>) => {
+        const booking = await getById('bookings', payment.bookingId as string)
+        let customer = null
+        let vehicle = null
+        if (booking) {
+          customer = await getById('users', booking.customerId as string)
+          vehicle = await getById('vehicles', booking.vehicleId as string)
+        }
+        return { ...payment, booking: booking ? { ...booking, customer, vehicle } : null }
+      })
+    )
 
     return NextResponse.json({
       success: true,
-      data: payments,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
+      data: enriched,
+      pagination: { page, limit, total, totalPages },
+    })
   } catch (error) {
-    console.error('Payments GET error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch payments' },
-      { status: 500 }
-    );
+    console.error('Payments list error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal memuat data pembayaran' }, { status: 500 })
   }
 }
 
-// POST /api/payments - Create payment
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await request.json()
+    const { bookingId, amount, method, status, isDownPayment, transactionId } = body
 
-    // Check booking exists
-    const booking = await db.booking.findUnique({
-      where: { id: body.bookingId },
-    });
+    const booking = await getById('bookings', bookingId)
+    if (!booking) return NextResponse.json({ success: false, error: 'Booking tidak ditemukan' }, { status: 404 })
 
-    if (!booking) {
-      return NextResponse.json(
-        { success: false, error: 'Booking not found' },
-        { status: 404 }
-      );
-    }
+    const data: Record<string, unknown> = { bookingId, amount, method, status: status || 'PENDING', isDownPayment: isDownPayment || false, transactionId: transactionId || null }
+    if (status === 'SUCCESS') data.paidAt = new Date().toISOString()
 
-    const payment = await db.payment.create({
-      data: {
-        bookingId: body.bookingId,
-        amount: body.amount,
-        method: body.method,
-        status: body.status || 'PENDING',
-        isDownPayment: body.isDownPayment || false,
-        transactionId: body.transactionId || null,
-        paidAt: body.status === 'SUCCESS' ? new Date() : null,
-      },
-      include: {
-        booking: {
-          select: {
-            id: true,
-            totalPrice: true,
-            status: true,
-            customer: { select: { id: true, name: true } },
-          },
-        },
-      },
-    });
-
-    return NextResponse.json({ success: true, data: payment }, { status: 201 });
+    const id = await create('payments', data)
+    const payment = await getById('payments', id)
+    return NextResponse.json({ success: true, data: payment }, { status: 201 })
   } catch (error) {
-    console.error('Payments POST error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to create payment' },
-      { status: 500 }
-    );
+    console.error('Payment create error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal membuat pembayaran' }, { status: 500 })
   }
 }

@@ -1,140 +1,120 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server'
+import { getAll, count, create, update, getById, getByField } from '@/lib/firestore'
 
-// GET /api/bookings - List bookings with filters
+async function enrichBooking(booking: Record<string, unknown>) {
+  const [customer, vehicle, payments] = await Promise.all([
+    getById('users', booking.customerId as string),
+    getById('vehicles', booking.vehicleId as string),
+    getAll('payments', { where: { bookingId: ['==', booking.id] } }),
+  ])
+
+  let driver: Record<string, unknown> | null = null
+  if (booking.driverId) {
+    const driverDoc = await getById('drivers', booking.driverId as string)
+    if (driverDoc) {
+      const driverUser = await getById('users', driverDoc.userId as string)
+      driver = { ...driverDoc, user: driverUser ? { name: driverUser.name, phone: driverUser.phone } : null }
+    }
+  }
+
+  return { ...booking, customer, vehicle, driver, payments }
+}
+
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status');
-    const customerId = searchParams.get('customerId');
-    const vehicleId = searchParams.get('vehicleId');
-    const withDriver = searchParams.get('withDriver');
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const sortBy = searchParams.get('sortBy') || 'createdAt';
-    const sortOrder = searchParams.get('sortOrder') || 'desc';
+    const { searchParams } = new URL(request.url)
+    const status = searchParams.get('status')
+    const customerId = searchParams.get('customerId')
+    const vehicleId = searchParams.get('vehicleId')
+    const withDriver = searchParams.get('withDriver')
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = parseInt(searchParams.get('limit') || '10')
 
-    // Build where clause
-    const where: Record<string, unknown> = {};
-    if (status) where.status = status;
-    if (customerId) where.customerId = customerId;
-    if (vehicleId) where.vehicleId = vehicleId;
-    if (withDriver !== null && withDriver !== '') {
-      where.withDriver = withDriver === 'true';
+    let bookings = await getAll('bookings', { orderBy: 'createdAt', orderDir: 'desc' })
+
+    if (status) bookings = bookings.filter((b: Record<string, unknown>) => b.status === status)
+    if (customerId) bookings = bookings.filter((b: Record<string, unknown>) => b.customerId === customerId)
+    if (vehicleId) bookings = bookings.filter((b: Record<string, unknown>) => b.vehicleId === vehicleId)
+    if (withDriver !== null) {
+      const val = withDriver === 'true'
+      bookings = bookings.filter((b: Record<string, unknown>) => b.withDriver === val)
     }
 
-    const orderBy: Record<string, string> = { [sortBy]: sortOrder };
+    const total = bookings.length
+    const totalPages = Math.ceil(total / limit)
+    const start = (page - 1) * limit
+    const paginated = bookings.slice(start, start + limit)
 
-    const [bookings, total] = await Promise.all([
-      db.booking.findMany({
-        where,
-        orderBy,
-        skip: (page - 1) * limit,
-        take: limit,
-        include: {
-          customer: { select: { id: true, name: true, email: true, phone: true } },
-          vehicle: { select: { id: true, brand: true, model: true, plateNumber: true, imageUrl: true } },
-          driver: { select: { id: true, name: true, phone: true } },
-          payments: true,
-        },
-      }),
-      db.booking.count({ where }),
-    ]);
+    const enriched = await Promise.all(paginated.map((b: Record<string, unknown>) => enrichBooking(b)))
 
     return NextResponse.json({
       success: true,
-      data: bookings,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
+      data: enriched,
+      pagination: { page, limit, total, totalPages },
+    })
   } catch (error) {
-    console.error('Bookings GET error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch bookings' },
-      { status: 500 }
-    );
+    console.error('Bookings list error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal memuat data booking' }, { status: 500 })
   }
 }
 
-// POST /api/bookings - Create booking
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await request.json()
+    const { customerId, vehicleId, driverId, startDate, endDate, withDriver, pickupLocation, returnLocation, notes } = body
 
-    // Check vehicle availability
-    const vehicle = await db.vehicle.findUnique({
-      where: { id: body.vehicleId },
-    });
+    const vehicle = await getById('vehicles', vehicleId)
+    if (!vehicle) return NextResponse.json({ success: false, error: 'Kendaraan tidak ditemukan' }, { status: 404 })
+    if (vehicle.status !== 'AVAILABLE') return NextResponse.json({ success: false, error: 'Kendaraan tidak tersedia' }, { status: 400 })
 
-    if (!vehicle) {
-      return NextResponse.json(
-        { success: false, error: 'Vehicle not found' },
-        { status: 404 }
-      );
+    const existingBookings = await getAll('bookings', { where: { vehicleId: ['==', vehicleId] } })
+    const start = new Date(startDate)
+    const end = new Date(endDate)
+    const hasConflict = existingBookings.some((b: Record<string, unknown>) => {
+      if (b.status === 'CANCELLED') return false
+      const bs = new Date(b.startDate as string)
+      const be = new Date(b.endDate as string)
+      return start < be && end > bs
+    })
+    if (hasConflict) return NextResponse.json({ success: false, error: 'Kendaraan sudah dibooking di tanggal tersebut' }, { status: 400 })
+
+    let finalCustomerId = customerId
+    if (!finalCustomerId) {
+      const existingUser = await getByField('users', 'phone', body.customerPhone)
+      if (existingUser) {
+        finalCustomerId = existingUser.id
+      } else {
+        finalCustomerId = await create('users', {
+          name: body.customerName || 'Pelanggan',
+          email: body.customerEmail || '',
+          phone: body.customerPhone || '',
+          password: 'password123',
+          role: 'CUSTOMER',
+        })
+      }
     }
 
-    if (vehicle.status !== 'AVAILABLE') {
-      return NextResponse.json(
-        { success: false, error: 'Vehicle is not available for booking' },
-        { status: 400 }
-      );
-    }
+    const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
+    const totalPrice = days * Number(vehicle.dailyRate || 0)
 
-    // Check for date conflicts
-    const conflictingBooking = await db.booking.findFirst({
-      where: {
-        vehicleId: body.vehicleId,
-        status: { in: ['ACTIVE', 'CONFIRMED', 'PENDING'] },
-        OR: [
-          { startDate: { lte: new Date(body.endDate) }, endDate: { gte: new Date(body.startDate) } },
-        ],
-      },
-    });
+    const bookingId = await create('bookings', {
+      customerId: finalCustomerId,
+      vehicleId,
+      driverId: driverId || null,
+      startDate,
+      endDate,
+      totalPrice,
+      status: 'PENDING',
+      withDriver: withDriver || false,
+      pickupLocation: pickupLocation || null,
+      returnLocation: returnLocation || null,
+      notes: notes || null,
+    })
 
-    if (conflictingBooking) {
-      return NextResponse.json(
-        { success: false, error: 'Vehicle is already booked for the selected dates' },
-        { status: 400 }
-      );
-    }
-
-    // Calculate total price
-    const start = new Date(body.startDate);
-    const end = new Date(body.endDate);
-    const days = Math.ceil((end.getTime() - start.getTime()) / 86400000);
-    const totalPrice = body.totalPrice || days * vehicle.dailyRate;
-
-    const booking = await db.booking.create({
-      data: {
-        customerId: body.customerId,
-        vehicleId: body.vehicleId,
-        driverId: body.driverId || null,
-        startDate: start,
-        endDate: end,
-        totalPrice,
-        status: body.status || 'PENDING',
-        withDriver: body.withDriver || false,
-        pickupLocation: body.pickupLocation || null,
-        returnLocation: body.returnLocation || null,
-        notes: body.notes || null,
-      },
-      include: {
-        customer: { select: { id: true, name: true, email: true } },
-        vehicle: { select: { id: true, brand: true, model: true, plateNumber: true } },
-        driver: { select: { id: true, name: true } },
-      },
-    });
-
-    return NextResponse.json({ success: true, data: booking }, { status: 201 });
+    const booking = await getById('bookings', bookingId)
+    return NextResponse.json({ success: true, data: booking }, { status: 201 })
   } catch (error) {
-    console.error('Bookings POST error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to create booking' },
-      { status: 500 }
-    );
+    console.error('Booking create error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal membuat booking' }, { status: 500 })
   }
 }

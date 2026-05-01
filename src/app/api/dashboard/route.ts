@@ -1,119 +1,80 @@
-import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { NextResponse } from 'next/server'
+import { count, getAll } from '@/lib/firestore'
 
 export async function GET() {
   try {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const weekAgo = new Date(today.getTime() - 7 * 86400000);
-    const monthAgo = new Date(today.getTime() - 30 * 86400000);
+    const today = new Date()
+    const todayStr = today.toISOString().split('T')[0]
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    const monthAgo = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate()).toISOString()
 
-    // Run all queries in parallel for performance
     const [
       totalVehicles,
       availableVehicles,
       rentedVehicles,
-      maintenanceVehicles,
-      todayBookings,
       activeBookings,
       pendingBookings,
-      completedPayments,
-      dailyPayments,
-      weeklyPayments,
-      monthlyPayments,
-      upcomingMaintenance,
+      todayBookingsList,
+      allPayments,
+      maintenanceAlerts,
       totalCustomers,
       totalDrivers,
     ] = await Promise.all([
-      // Total vehicles
-      db.vehicle.count(),
-      // Available vehicles
-      db.vehicle.count({ where: { status: 'AVAILABLE' } }),
-      // Rented vehicles
-      db.vehicle.count({ where: { status: 'RENTED' } }),
-      // Maintenance vehicles
-      db.vehicle.count({ where: { status: 'MAINTENANCE' } }),
-      // Today's bookings
-      db.booking.count({
-        where: {
-          startDate: { lte: new Date(today.getTime() + 86400000) },
-          endDate: { gte: today },
-        },
-      }),
-      // Active bookings
-      db.booking.count({ where: { status: 'ACTIVE' } }),
-      // Pending bookings
-      db.booking.count({ where: { status: 'PENDING' } }),
-      // All completed payments (total revenue)
-      db.payment.aggregate({
-        where: { status: 'SUCCESS' },
-        _sum: { amount: true },
-      }),
-      // Today's revenue
-      db.payment.aggregate({
-        where: { status: 'SUCCESS', paidAt: { gte: today } },
-        _sum: { amount: true },
-      }),
-      // Weekly revenue
-      db.payment.aggregate({
-        where: { status: 'SUCCESS', paidAt: { gte: weekAgo } },
-        _sum: { amount: true },
-      }),
-      // Monthly revenue
-      db.payment.aggregate({
-        where: { status: 'SUCCESS', paidAt: { gte: monthAgo } },
-        _sum: { amount: true },
-      }),
-      // Upcoming maintenance alerts (within 7 days or overdue)
-      db.maintenance.findMany({
-        where: {
-          status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
-          dueDate: {
-            lte: new Date(today.getTime() + 7 * 86400000),
-          },
-        },
-        include: {
-          vehicle: { select: { brand: true, model: true, plateNumber: true } },
-        },
-        orderBy: { dueDate: 'asc' },
-        take: 10,
-      }),
-      // Total customers
-      db.user.count({ where: { role: 'CUSTOMER' } }),
-      // Total drivers
-      db.driver.count(),
-    ]);
+      count('vehicles'),
+      count('vehicles', { status: ['==', 'AVAILABLE'] }),
+      count('vehicles', { status: ['==', 'RENTED'] }),
+      count('bookings', { status: ['==', 'ACTIVE'] }),
+      count('bookings', { status: ['==', 'PENDING'] }),
+      getAll('bookings'),
+      getAll('payments', { where: { status: ['==', 'SUCCESS'] } }),
+      count('maintenance', { status: ['==', 'OVERDUE'] }),
+      count('users', { role: ['==', 'CUSTOMER'] }),
+      count('drivers'),
+    ])
+
+    const todayBookings = todayBookingsList.filter(
+      (b: Record<string, unknown>) => String(b.startDate).startsWith(todayStr)
+    ).length
+
+    const totalRevenue = allPayments.reduce(
+      (sum: number, p: Record<string, unknown>) => sum + Number(p.amount || 0),
+      0
+    )
+    const dailyRevenue = allPayments
+      .filter((p: Record<string, unknown>) => String(p.paidAt).startsWith(todayStr))
+      .reduce((sum: number, p: Record<string, unknown>) => sum + Number(p.amount || 0), 0)
+    const weeklyRevenue = allPayments
+      .filter((p: Record<string, unknown>) => p.paidAt >= weekAgo)
+      .reduce((sum: number, p: Record<string, unknown>) => sum + Number(p.amount || 0), 0)
+    const monthlyRevenue = allPayments
+      .filter((p: Record<string, unknown>) => p.paidAt >= monthAgo)
+      .reduce((sum: number, p: Record<string, unknown>) => sum + Number(p.amount || 0), 0)
 
     return NextResponse.json({
       success: true,
       data: {
-        vehicles: {
-          total: totalVehicles,
-          available: availableVehicles,
-          rented: rentedVehicles,
-          maintenance: maintenanceVehicles,
+        stats: {
+          totalVehicles,
+          availableVehicles,
+          rentedVehicles,
+          activeBookings,
+          pendingBookings,
+          todayBookings,
+          totalRevenue,
+          monthlyRevenue,
+          weeklyRevenue,
+          dailyRevenue,
+          maintenanceAlerts,
+          totalCustomers,
+          totalDrivers,
         },
-        bookings: {
-          today: todayBookings,
-          active: activeBookings,
-          pending: pendingBookings,
-        },
-        revenue: {
-          total: completedPayments._sum.amount || 0,
-          daily: dailyPayments._sum.amount || 0,
-          weekly: weeklyPayments._sum.amount || 0,
-          monthly: monthlyPayments._sum.amount || 0,
-        },
-        maintenanceAlerts: upcomingMaintenance,
-        customers: { total: totalCustomers },
-        drivers: { total: totalDrivers },
       },
-    });
+    })
   } catch (error) {
-    console.error('Dashboard API error:', error);
+    console.error('Dashboard error:', error)
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch dashboard data' },
+      { success: false, error: 'Gagal memuat data dashboard' },
       { status: 500 }
-    );
+    )
   }
 }

@@ -1,142 +1,90 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server'
+import { getById, update, remove, removeWhere, getAll, getByField } from '@/lib/firestore'
 
-// GET /api/bookings/[id] - Get single booking
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
-
-    const booking = await db.booking.findUnique({
-      where: { id },
-      include: {
-        customer: { select: { id: true, name: true, email: true, phone: true } },
-        vehicle: true,
-        driver: { select: { id: true, name: true, phone: true } },
-        payments: true,
-        documents: true,
-        reviews: true,
-      },
-    });
-
+    const { id } = await params
+    const booking = await getById('bookings', id)
     if (!booking) {
-      return NextResponse.json(
-        { success: false, error: 'Booking not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: 'Booking tidak ditemukan' }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true, data: booking });
+    const [customer, vehicle, payments, documents, reviews] = await Promise.all([
+      getById('users', booking.customerId as string),
+      getById('vehicles', booking.vehicleId as string),
+      getAll('payments', { where: { bookingId: ['==', id] } }),
+      getAll('documents', { where: { bookingId: ['==', id] } }),
+      getByField('reviews', 'bookingId', id),
+    ])
+
+    let driver = null
+    if (booking.driverId) {
+      const driverDoc = await getById('drivers', booking.driverId as string)
+      if (driverDoc) {
+        const driverUser = await getById('users', driverDoc.userId as string)
+        driver = { ...driverDoc, user: driverUser ? { name: driverUser.name, phone: driverUser.phone } : null }
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: { ...booking, customer, vehicle, driver, payments, documents, review: reviews },
+    })
   } catch (error) {
-    console.error('Booking GET error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch booking' },
-      { status: 500 }
-    );
+    console.error('Booking detail error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal memuat booking' }, { status: 500 })
   }
 }
 
-// PUT /api/bookings/[id] - Update booking
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
-    const body = await request.json();
-
-    const existing = await db.booking.findUnique({ where: { id } });
+    const { id } = await params
+    const existing = await getById('bookings', id)
     if (!existing) {
-      return NextResponse.json(
-        { success: false, error: 'Booking not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: 'Booking tidak ditemukan' }, { status: 404 })
     }
 
-    const booking = await db.booking.update({
-      where: { id },
-      data: {
-        status: body.status ?? existing.status,
-        driverId: body.driverId !== undefined ? body.driverId : existing.driverId,
-        startDate: body.startDate ? new Date(body.startDate) : existing.startDate,
-        endDate: body.endDate ? new Date(body.endDate) : existing.endDate,
-        totalPrice: body.totalPrice ?? existing.totalPrice,
-        withDriver: body.withDriver !== undefined ? body.withDriver : existing.withDriver,
-        pickupLocation: body.pickupLocation !== undefined ? body.pickupLocation : existing.pickupLocation,
-        returnLocation: body.returnLocation !== undefined ? body.returnLocation : existing.returnLocation,
-        notes: body.notes !== undefined ? body.notes : existing.notes,
-      },
-      include: {
-        customer: { select: { id: true, name: true, email: true } },
-        vehicle: { select: { id: true, brand: true, model: true, plateNumber: true } },
-        driver: { select: { id: true, name: true } },
-      },
-    });
+    const body = await request.json()
+    const { status } = body
 
-    // If booking is confirmed or active, update vehicle status
-    if (body.status === 'CONFIRMED' || body.status === 'ACTIVE') {
-      await db.vehicle.update({
-        where: { id: existing.vehicleId },
-        data: { status: 'RENTED' },
-      });
+    if (status && existing.vehicleId) {
+      if (status === 'CONFIRMED' || status === 'ACTIVE') {
+        await update('vehicles', existing.vehicleId as string, { status: 'RENTED' })
+      } else if (status === 'COMPLETED' || status === 'CANCELLED') {
+        await update('vehicles', existing.vehicleId as string, { status: 'AVAILABLE' })
+      }
     }
 
-    // If booking is completed or cancelled, update vehicle status
-    if (body.status === 'COMPLETED' || body.status === 'CANCELLED') {
-      await db.vehicle.update({
-        where: { id: existing.vehicleId },
-        data: { status: 'AVAILABLE' },
-      });
-    }
-
-    return NextResponse.json({ success: true, data: booking });
+    delete body.customerId
+    delete body.vehicleId
+    await update('bookings', id, body)
+    const booking = await getById('bookings', id)
+    return NextResponse.json({ success: true, data: booking })
   } catch (error) {
-    console.error('Booking PUT error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to update booking' },
-      { status: 500 }
-    );
+    console.error('Booking update error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal mengupdate booking' }, { status: 500 })
   }
 }
 
-// DELETE /api/bookings/[id] - Delete booking
-export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
-
-    const existing = await db.booking.findUnique({ where: { id } });
+    const { id } = await params
+    const existing = await getById('bookings', id)
     if (!existing) {
-      return NextResponse.json(
-        { success: false, error: 'Booking not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: 'Booking tidak ditemukan' }, { status: 404 })
     }
-
     if (existing.status === 'ACTIVE') {
-      return NextResponse.json(
-        { success: false, error: 'Cannot delete an active booking' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'Booking aktif tidak dapat dihapus' }, { status: 400 })
     }
 
-    // Delete related records first (foreign key constraints)
-    await db.payment.deleteMany({ where: { bookingId: id } });
-    await db.document.deleteMany({ where: { bookingId: id } });
-    await db.review.deleteMany({ where: { bookingId: id } });
+    await removeWhere('payments', 'bookingId', id)
+    await removeWhere('documents', 'bookingId', id)
+    await removeWhere('reviews', 'bookingId', id)
+    await remove('bookings', id)
 
-    await db.booking.delete({ where: { id } });
-
-    return NextResponse.json({ success: true, message: 'Booking deleted successfully' });
+    return NextResponse.json({ success: true, message: 'Booking berhasil dihapus' })
   } catch (error) {
-    console.error('Booking DELETE error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to delete booking' },
-      { status: 500 }
-    );
+    console.error('Booking delete error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal menghapus booking' }, { status: 500 })
   }
 }

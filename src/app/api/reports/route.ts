@@ -1,205 +1,107 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server'
+import { getAll, count, getById } from '@/lib/firestore'
 
-// GET /api/reports - Comprehensive report data
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const period = searchParams.get('period') || 'monthly'; // daily, weekly, monthly, yearly
+    const { searchParams } = new URL(request.url)
+    const period = searchParams.get('period') || 'monthly'
 
-    const now = new Date();
-    let startDate: Date;
+    const [allPayments, allBookings, allMaintenance, allVehicles, allUsers] = await Promise.all([
+      getAll('payments', { where: { status: ['==', 'SUCCESS'] } }),
+      getAll('bookings'),
+      getAll('maintenance'),
+      getAll('vehicles'),
+      getAll('users'),
+    ])
 
-    switch (period) {
-      case 'daily':
-        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        break;
-      case 'weekly':
-        startDate = new Date(now.getTime() - 7 * 86400000);
-        break;
-      case 'yearly':
-        startDate = new Date(now.getFullYear(), 0, 1);
-        break;
-      default: // monthly
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        break;
-    }
+    const now = new Date()
 
-    // Run all queries in parallel
-    const [
-      totalIncome,
-      totalExpenses,
-      completedBookings,
-      allPayments,
-      popularVehicles,
-      topCustomers,
-      bookingStatusBreakdown,
-      paymentMethodBreakdown,
-      monthlyRevenue,
-      vehicleUtilization,
-    ] = await Promise.all([
-      // Total income from successful payments
-      db.payment.aggregate({
-        where: {
-          status: 'SUCCESS',
-          paidAt: { gte: startDate },
-        },
-        _sum: { amount: true },
-      }),
+    let startDate: Date
+    if (period === 'daily') startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    else if (period === 'weekly') startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    else if (period === 'yearly') startDate = new Date(now.getFullYear(), 0, 1)
+    else startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate())
 
-      // Total expenses from maintenance
-      db.maintenance.aggregate({
-        where: {
-          status: { in: ['COMPLETED', 'IN_PROGRESS'] },
-          createdAt: { gte: startDate },
-        },
-        _sum: { cost: true },
-      }),
+    const startIso = startDate.toISOString()
 
-      // Completed bookings count
-      db.booking.count({
-        where: {
-          status: 'COMPLETED',
-          updatedAt: { gte: startDate },
-        },
-      }),
+    const filteredPayments = allPayments.filter((p: Record<string, unknown>) => p.paidAt >= startIso)
+    const filteredBookings = allBookings.filter((b: Record<string, unknown>) => b.createdAt >= startIso)
 
-      // All successful payments for the period
-      db.payment.findMany({
-        where: {
-          status: 'SUCCESS',
-          paidAt: { gte: startDate },
-        },
-        select: { amount: true, paidAt: true, method: true },
-      }),
+    const totalRevenue = filteredPayments.reduce((sum: number, p: Record<string, unknown>) => sum + Number(p.amount || 0), 0)
+    const totalBookings = filteredBookings.length
+    const completedBookings = filteredBookings.filter((b: Record<string, unknown>) => b.status === 'COMPLETED').length
+    const cancelledBookings = filteredBookings.filter((b: Record<string, unknown>) => b.status === 'CANCELLED').length
 
-      // Most popular vehicles (by booking count)
-      db.booking.groupBy({
-        by: ['vehicleId'],
-        where: { status: { in: ['COMPLETED', 'ACTIVE'] } },
-        _count: { id: true },
-        _sum: { totalPrice: true },
-        orderBy: { _count: { id: 'desc' } },
-        take: 10,
-      }),
+    const monthlyRevenue: Record<string, number> = {}
+    filteredPayments.forEach((p: Record<string, unknown>) => {
+      const date = String(p.paidAt).substring(0, 7)
+      monthlyRevenue[date] = (monthlyRevenue[date] || 0) + Number(p.amount || 0)
+    })
 
-      // Top customers by spending
-      db.booking.groupBy({
-        by: ['customerId'],
-        where: { status: 'COMPLETED' },
-        _sum: { totalPrice: true },
-        _count: { id: true },
-        orderBy: { _sum: { totalPrice: 'desc' } },
-        take: 10,
-      }),
+    const vehicleBookingCount: Record<string, number> = {}
+    filteredBookings.forEach((b: Record<string, unknown>) => {
+      vehicleBookingCount[b.vehicleId as string] = (vehicleBookingCount[b.vehicleId as string] || 0) + 1
+    })
 
-      // Booking status breakdown
-      db.booking.groupBy({
-        by: ['status'],
-        _count: { id: true },
-      }),
-
-      // Payment method breakdown
-      db.payment.groupBy({
-        by: ['method'],
-        where: { status: 'SUCCESS', paidAt: { gte: startDate } },
-        _sum: { amount: true },
-        _count: { id: true },
-      }),
-
-      // Monthly revenue (last 12 months)
-      db.$queryRaw<Array<{ month: string; revenue: number }>>`
-        SELECT
-          to_char("paidAt", 'YYYY-MM') as month,
-          SUM(amount) as revenue
-        FROM "Payment"
-        WHERE status = 'SUCCESS' AND paidAt IS NOT NULL
-        GROUP BY to_char("paidAt", 'YYYY-MM')
-        ORDER BY month DESC
-        LIMIT 12
-      `,
-
-      // Vehicle utilization
-      db.vehicle.findMany({
-        select: {
-          id: true,
-          brand: true,
-          model: true,
-          plateNumber: true,
-          status: true,
-          dailyRate: true,
-          _count: {
-            select: { bookings: true },
-          },
-        },
-      }),
-    ]);
-
-    const income = totalIncome._sum.amount || 0;
-    const expenses = totalExpenses._sum.cost || 0;
-    const profit = income - expenses;
-
-    // Sort vehicle utilization by bookings count descending
-    vehicleUtilization.sort((a, b) => b._count.bookings - a._count.bookings);
-
-    // Enrich popular vehicles with vehicle details
-    const popularVehiclesEnriched = await Promise.all(
-      popularVehicles.map(async (pv) => {
-        const vehicle = await db.vehicle.findUnique({
-          where: { id: pv.vehicleId },
-          select: { brand: true, model: true, plateNumber: true, category: true, imageUrl: true },
-        });
-        return {
-          vehicle,
-          bookingCount: pv._count.id,
-          totalRevenue: pv._sum.totalPrice,
-        };
+    const topVehicleIds = Object.entries(vehicleBookingCount).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    const topVehicles = await Promise.all(
+      topVehicleIds.map(async ([vid, cnt]) => {
+        const v = await getById('vehicles', vid)
+        return v ? { ...v, bookingCount: cnt } : null
       })
-    );
+    )
+    const popularVehicles = topVehicles.filter(Boolean)
 
-    // Enrich top customers with user details
-    const topCustomersEnriched = await Promise.all(
-      topCustomers.map(async (tc) => {
-        const user = await db.user.findUnique({
-          where: { id: tc.customerId },
-          select: { name: true, email: true, phone: true },
-        });
-        return {
-          customer: user,
-          totalSpent: tc._sum.totalPrice,
-          bookingCount: tc._count.id,
-        };
+    const customerSpending: Record<string, number> = {}
+    filteredPayments.forEach((p: Record<string, unknown>) => {
+      const booking = allBookings.find((b: Record<string, unknown>) => b.id === p.bookingId)
+      if (booking) {
+        customerSpending[booking.customerId as string] = (customerSpending[booking.customerId as string] || 0) + Number(p.amount || 0)
+      }
+    })
+    const topCustomerIds = Object.entries(customerSpending).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    const topCustomers = await Promise.all(
+      topCustomerIds.map(async ([uid, spent]) => {
+        const u = await getById('users', uid)
+        return u ? { ...u, totalSpent: spent } : null
       })
-    );
+    )
+    const topSpendingCustomers = topCustomers.filter(Boolean)
+
+    const paymentByMethod: Record<string, number> = {}
+    filteredPayments.forEach((p: Record<string, unknown>) => {
+      const method = p.method as string || 'Unknown'
+      paymentByMethod[method] = (paymentByMethod[method] || 0) + 1
+    })
+
+    const bookingByStatus: Record<string, number> = {}
+    filteredBookings.forEach((b: Record<string, unknown>) => {
+      const s = b.status as string || 'Unknown'
+      bookingByStatus[s] = (bookingByStatus[s] || 0) + 1
+    })
+
+    const totalMaintenanceCost = allMaintenance
+      .filter((m: Record<string, unknown>) => m.status === 'COMPLETED')
+      .reduce((sum: number, m: Record<string, unknown>) => sum + Number(m.cost || 0), 0)
+
+    const activeVehicles = allVehicles.filter((v: Record<string, unknown>) => v.status === 'AVAILABLE').length
+    const utilizationRate = allVehicles.length > 0 ? Math.round((1 - activeVehicles / allVehicles.length) * 100) : 0
 
     return NextResponse.json({
       success: true,
       data: {
-        summary: {
-          period,
-          income,
-          expenses,
-          profit,
-          completedBookings,
-          profitMargin: income > 0 ? ((profit / income) * 100).toFixed(1) : '0',
-        },
-        popularVehicles: popularVehiclesEnriched,
-        topCustomers: topCustomersEnriched,
-        bookingStatusBreakdown,
-        paymentMethodBreakdown,
-        monthlyRevenue,
-        vehicleUtilization,
-        transactions: allPayments.length,
-        averageTransactionValue: allPayments.length > 0
-          ? income / allPayments.length
-          : 0,
+        period,
+        dateRange: { start: startIso, end: now.toISOString() },
+        revenue: { total: totalRevenue, monthlyBreakdown: monthlyRevenue },
+        bookings: { total: totalBookings, completed: completedBookings, cancelled: cancelledBookings, byStatus: bookingByStatus },
+        payments: { total: filteredPayments.length, byMethod: paymentByMethod, averageAmount: filteredPayments.length > 0 ? totalRevenue / filteredPayments.length : 0 },
+        vehicles: { total: allVehicles.length, active: activeVehicles, utilizationRate, popular: popularVehicles },
+        customers: { total: allUsers.filter((u: Record<string, unknown>) => u.role === 'CUSTOMER').length, topSpending: topSpendingCustomers },
+        maintenance: { totalCost: totalMaintenanceCost, totalRecords: allMaintenance.length },
       },
-    });
+    })
   } catch (error) {
-    console.error('Reports GET error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch report data' },
-      { status: 500 }
-    );
+    console.error('Reports error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal memuat laporan' }, { status: 500 })
   }
 }

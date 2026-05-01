@@ -1,106 +1,62 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server'
+import { getAll, count } from '@/lib/firestore'
 
-// GET /api/customers - List customers with rental history and loyalty status
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const search = searchParams.get('search');
-    const sortBy = searchParams.get('sortBy') || 'createdAt';
-    const sortOrder = searchParams.get('sortOrder') || 'desc';
+    const { searchParams } = new URL(request.url)
+    const search = searchParams.get('search')
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = parseInt(searchParams.get('limit') || '10')
 
-    const where: Record<string, unknown> = { role: 'CUSTOMER' };
+    let users = await getAll('users', { orderBy: 'createdAt', orderDir: 'desc' })
+    let customers = users.filter((u: Record<string, unknown>) => u.role === 'CUSTOMER')
+
     if (search) {
-      where.OR = [
-        { name: { contains: search } },
-        { email: { contains: search } },
-        { phone: { contains: search } },
-      ];
+      const q = search.toLowerCase()
+      customers = customers.filter((c: Record<string, unknown>) =>
+        String(c.name || '').toLowerCase().includes(q) ||
+        String(c.email || '').toLowerCase().includes(q)
+      )
     }
 
-    const orderBy: Record<string, string> = { [sortBy]: sortOrder };
+    const allBookings = await getAll('bookings')
+    const allReviews = await getAll('reviews')
 
-    const [customers, total] = await Promise.all([
-      db.user.findMany({
-        where,
-        orderBy,
-        skip: (page - 1) * limit,
-        take: limit,
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phone: true,
-          avatar: true,
-          isVerified: true,
-          createdAt: true,
-          _count: {
-            select: { bookings: true, reviews: true },
-          },
-        },
-      }),
-      db.user.count({ where }),
-    ]);
+    const enriched = await Promise.all(
+      customers.map(async (customer: Record<string, unknown>) => {
+        const customerBookings = allBookings.filter((b: Record<string, unknown>) => b.customerId === customer.id)
+        const customerReviews = allReviews.filter((r: Record<string, unknown>) => r.customerId === customer.id)
 
-    // Enrich with rental stats
-    const enrichedCustomers = await Promise.all(
-      customers.map(async (customer) => {
-        const rentalStats = await db.booking.aggregate({
-          where: { customerId: customer.id, status: 'COMPLETED' },
-          _sum: { totalPrice: true },
-          _count: true,
-        });
+        const totalSpent = customerBookings
+          .filter((b: Record<string, unknown>) => b.status === 'COMPLETED')
+          .reduce((sum: number, b: Record<string, unknown>) => sum + Number(b.totalPrice || 0), 0)
 
-        const totalSpent = rentalStats._sum.totalPrice || 0;
-        const totalRentals = rentalStats._count;
+        const totalRentals = customerBookings.length
+        const avgRating = customerReviews.length > 0
+          ? customerReviews.reduce((sum: number, r: Record<string, unknown>) => sum + Number(r.rating || 0), 0) / customerReviews.length
+          : 0
 
-        // Determine loyalty status
-        let loyaltyStatus = 'Bronze';
-        let loyaltyDiscount = 0;
-        if (totalRentals >= 10 || totalSpent >= 20000000) {
-          loyaltyStatus = 'Platinum';
-          loyaltyDiscount = 15;
-        } else if (totalRentals >= 5 || totalSpent >= 10000000) {
-          loyaltyStatus = 'Gold';
-          loyaltyDiscount = 10;
-        } else if (totalRentals >= 3 || totalSpent >= 5000000) {
-          loyaltyStatus = 'Silver';
-          loyaltyDiscount = 5;
-        }
+        let loyaltyTier = 'Bronze'
+        if (totalRentals > 20) loyaltyTier = 'Platinum'
+        else if (totalRentals > 10) loyaltyTier = 'Gold'
+        else if (totalRentals >= 5) loyaltyTier = 'Silver'
 
-        const avgRating = await db.review.aggregate({
-          where: { customerId: customer.id },
-          _avg: { rating: true },
-        });
-
-        return {
-          ...customer,
-          totalSpent,
-          totalRentals,
-          loyaltyStatus,
-          loyaltyDiscount,
-          averageRating: avgRating._avg.rating || 0,
-        };
+        return { ...customer, totalSpent, totalRentals, avgRating: Math.round(avgRating * 10) / 10, loyaltyTier }
       })
-    );
+    )
+
+    const total = enriched.length
+    const totalPages = Math.ceil(total / limit)
+    const start = (page - 1) * limit
+    const paginated = enriched.slice(start, start + limit)
 
     return NextResponse.json({
       success: true,
-      data: enrichedCustomers,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
+      data: paginated,
+      pagination: { page, limit, total, totalPages },
+    })
   } catch (error) {
-    console.error('Customers GET error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch customers' },
-      { status: 500 }
-    );
+    console.error('Customers list error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal memuat data pelanggan' }, { status: 500 })
   }
 }

@@ -1,92 +1,61 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server'
+import { getAll, count, create, getById } from '@/lib/firestore'
 
-// GET /api/vehicles - List vehicles with optional filters
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status');
-    const category = searchParams.get('category');
-    const search = searchParams.get('search');
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const sortBy = searchParams.get('sortBy') || 'createdAt';
-    const sortOrder = searchParams.get('sortOrder') || 'desc';
+    const { searchParams } = new URL(request.url)
+    const status = searchParams.get('status')
+    const category = searchParams.get('category')
+    const search = searchParams.get('search')
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = parseInt(searchParams.get('limit') || '10')
 
-    // Build where clause
-    const where: Record<string, unknown> = {};
-    if (status) where.status = status;
-    if (category) where.category = category;
+    let vehicles = await getAll('vehicles', {
+      orderBy: 'createdAt',
+      orderDir: 'desc',
+    })
+
+    if (status) vehicles = vehicles.filter((v: Record<string, unknown>) => v.status === status)
+    if (category) vehicles = vehicles.filter((v: Record<string, unknown>) => v.category === category)
     if (search) {
-      where.OR = [
-        { brand: { contains: search } },
-        { model: { contains: search } },
-        { plateNumber: { contains: search } },
-      ];
+      const q = search.toLowerCase()
+      vehicles = vehicles.filter((v: Record<string, unknown>) =>
+        String(v.brand || '').toLowerCase().includes(q) ||
+        String(v.model || '').toLowerCase().includes(q) ||
+        String(v.plateNumber || '').toLowerCase().includes(q)
+      )
     }
 
-    // Build orderBy
-    const orderBy: Record<string, string> = { [sortBy]: sortOrder };
-
-    const [vehicles, total] = await Promise.all([
-      db.vehicle.findMany({
-        where,
-        orderBy,
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      db.vehicle.count({ where }),
-    ]);
+    const total = vehicles.length
+    const totalPages = Math.ceil(total / limit)
+    const start = (page - 1) * limit
+    const paginatedVehicles = vehicles.slice(start, start + limit)
 
     return NextResponse.json({
       success: true,
-      data: vehicles,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
+      data: paginatedVehicles,
+      pagination: { page, limit, total, totalPages },
+    })
   } catch (error) {
-    console.error('Vehicles GET error:', error);
+    console.error('Vehicles list error:', error)
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch vehicles' },
+      { success: false, error: 'Gagal memuat data kendaraan' },
       { status: 500 }
-    );
+    )
   }
 }
 
-// POST /api/vehicles - Create vehicle
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-
-    const vehicle = await db.vehicle.create({
-      data: {
-        brand: body.brand,
-        model: body.model,
-        year: body.year,
-        color: body.color || null,
-        plateNumber: body.plateNumber,
-        category: body.category,
-        dailyRate: body.dailyRate,
-        weeklyRate: body.weeklyRate || null,
-        monthlyRate: body.monthlyRate || null,
-        fuelType: body.fuelType || null,
-        transmission: body.transmission || null,
-        seats: body.seats || 5,
-        imageUrl: body.imageUrl || null,
-        notes: body.notes || null,
-      },
-    });
-
-    return NextResponse.json({ success: true, data: vehicle }, { status: 201 });
+    const body = await request.json()
+    const id = await create('vehicles', body)
+    const vehicle = await getById('vehicles', id)
+    return NextResponse.json({ success: true, data: vehicle }, { status: 201 })
   } catch (error) {
-    console.error('Vehicles POST error:', error);
+    console.error('Vehicle create error:', error)
     return NextResponse.json(
-      { success: false, error: 'Failed to create vehicle' },
+      { success: false, error: 'Gagal menambahkan kendaraan' },
       { status: 500 }
-    );
+    )
   }
 }

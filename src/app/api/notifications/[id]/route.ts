@@ -1,33 +1,19 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server'
+import { getById, update } from '@/lib/firestore'
 
-// PUT /api/notifications/[id] - Mark single notification as read
-export async function PUT(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
-
-    const existing = await db.notification.findUnique({ where: { id } });
+    const { id } = await params
+    const existing = await getById('notifications', id)
     if (!existing) {
-      return NextResponse.json(
-        { success: false, error: 'Notification not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: 'Notifikasi tidak ditemukan' }, { status: 404 })
     }
 
-    const notification = await db.notification.update({
-      where: { id },
-      data: { isRead: true },
-    });
-
-    return NextResponse.json({ success: true, data: notification });
+    await update('notifications', id, { isRead: true })
+    const notification = await getById('notifications', id)
+    return NextResponse.json({ success: true, data: notification })
   } catch (error) {
-    console.error('Notification PUT error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to update notification' },
-      { status: 500 }
-    );
+    console.error('Notification update error:', error)
+    return NextResponse.json({ success: false, error: 'Gagal mengupdate notifikasi' }, { status: 500 })
   }
 }
