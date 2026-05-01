@@ -1,14 +1,31 @@
-import { initializeApp, getApps, getApp } from 'firebase/app'
-import { getFirestore } from 'firebase/firestore'
+import { initializeApp, getApps, getApp, cert } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
 
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || '',
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || '',
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'qia-trans-manajemen',
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || '',
+let _db: ReturnType<typeof getFirestore> | null = null
+
+function initApp() {
+  if (!getApps().length) {
+    const projectId = process.env.FIREBASE_PROJECT_ID || 'qia-trans-manajemen'
+    
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL
+    
+    if (privateKey && clientEmail) {
+      initializeApp({
+        credential: cert({
+          projectId,
+          privateKey: privateKey.replace(/\\n/g, '\n'),
+          clientEmail,
+        }),
+      })
+    } else {
+      initializeApp({ projectId })
+    }
+  }
 }
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp()
-export const db = getFirestore(app)
+export function getDb(): ReturnType<typeof getFirestore> {
+  initApp()
+  if (!_db) _db = getFirestore()
+  return _db
+}
