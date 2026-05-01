@@ -444,6 +444,18 @@ export function AppShell() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password: password.trim() }),
       });
+
+      if (!res.ok) {
+        let msg = 'Server error ' + res.status;
+        try {
+          const errBody = await res.json();
+          msg = errBody.error || msg;
+        } catch { /* not JSON */ }
+        setLoginError(msg);
+        setLoginLoading(false);
+        return;
+      }
+
       const json = await res.json();
       if (!json.success) {
         setLoginError(json.error || 'Login gagal');
