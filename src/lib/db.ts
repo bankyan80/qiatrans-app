@@ -1,18 +1,17 @@
 import { PrismaClient } from '@prisma/client'
 
 function getDatabaseUrl(): string {
-  const url = process.env.DATABASE_URL || ''
-  // Remove channel_binding parameter — not supported in serverless environments
-  let clean = url.replace(/[&?]channel_binding=[^&]*/g, '').replace(/\?$/, '')
-  // Add pgbouncer=true for Neon pooler compatibility in serverless
-  if (clean.includes('pooler') && !clean.includes('pgbouncer=')) {
-    clean += (clean.includes('?') ? '&' : '?') + 'pgbouncer=true'
-  }
-  // Add connection timeout for serverless
-  if (!clean.includes('connect_timeout=')) {
-    clean += (clean.includes('?') ? '&' : '?') + 'connect_timeout=15'
-  }
-  return clean
+  let url = process.env.DATABASE_URL || ''
+
+  // Remove channel_binding — not supported in serverless
+  url = url.replace(/[&?]channel_binding=[^&]*/g, '').replace(/\?$/, '')
+
+  // Use direct connection (not pooler) for serverless reliability
+  // Pooler (-pooler) uses TCP port 5432 which times out in serverless
+  // Direct connection uses WebSocket which is faster
+  url = url.replace(/-pooler\./, '.')
+
+  return url
 }
 
 const globalForPrisma = globalThis as unknown as {
@@ -27,7 +26,7 @@ export const db =
         url: getDatabaseUrl(),
       },
     },
-    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+    log: ['error'],
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
