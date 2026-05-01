@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Qua Trans Manajemen - Sistem Manajemen Transportasi",
+  title: "Qia Trans Manajemen - Sistem Manajemen Transportasi",
   description:
     "Aplikasi manajemen transportasi modern untuk pemilik usaha rental. Kelola armada, booking, pembayaran, dan laporan dalam satu platform.",
   keywords: [
@@ -28,9 +28,9 @@ export const metadata: Metadata = {
   icons: {
     icon: "/logo.png",
   },
-  authors: [{ name: "Qua Trans Manajemen" }],
+  authors: [{ name: "Qia Trans Manajemen" }],
   openGraph: {
-    title: "Qua Trans Manajemen - Sistem Manajemen Transportasi",
+    title: "Qia Trans Manajemen - Sistem Manajemen Transportasi",
     description:
       "Aplikasi manajemen transportasi modern untuk pemilik usaha rental.",
     type: "website",

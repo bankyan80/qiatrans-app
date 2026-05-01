@@ -173,11 +173,11 @@ function SidebarContent({ onSelectView, onCloseMobile }: { onSelectView: (v: Vie
       <div className="flex items-center gap-3 px-4 py-5">
         <img
           src="/logo.png"
-          alt="Qua Trans Manajemen"
+          alt="Qia Trans Manajemen"
           className="w-9 h-9 rounded-xl object-cover"
         />
         <div>
-          <h1 className="text-base font-bold text-foreground leading-tight">Qua Trans Manajemen</h1>
+          <h1 className="text-base font-bold text-foreground leading-tight">Qia Trans Manajemen</h1>
           <p className="text-[11px] text-muted-foreground leading-tight">Manajemen Transportasi</p>
         </div>
       </div>
@@ -332,10 +332,10 @@ export function AppShell() {
           <div className="flex items-center gap-2 lg:hidden">
             <img
               src="/logo.png"
-              alt="Qua Trans Manajemen"
+              alt="Qia Trans Manajemen"
               className="w-7 h-7 rounded-lg object-cover"
             />
-            <span className="text-sm font-bold text-foreground">Qua Trans Manajemen</span>
+            <span className="text-sm font-bold text-foreground">Qia Trans Manajemen</span>
           </div>
 
           {/* Spacer */}
@@ -438,7 +438,7 @@ export function AppShell() {
                 <DropdownMenuLabel>
                   <div className="flex flex-col gap-0.5">
                     <p className="text-sm font-medium">Admin Rental</p>
-                    <p className="text-xs text-muted-foreground">admin@quatrans.id</p>
+                    <p className="text-xs text-muted-foreground">admin@Qiatrans.id</p>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
@@ -598,7 +598,7 @@ export function AppShell() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold">AI Assistant</p>
-                  <p className="text-[10px] opacity-80">Qua Trans Assistant</p>
+                  <p className="text-[10px] opacity-80">Qia Trans Assistant</p>
                 </div>
               </div>
               <Button
@@ -624,7 +624,7 @@ export function AppShell() {
                   </div>
                   <p className="text-sm font-medium text-foreground mb-1">Halo! 👋</p>
                   <p className="text-xs text-muted-foreground">
-                    Saya asisten AI Qua Trans. Tanyakan apa saja tentang layanan transportasi kami.
+                    Saya asisten AI Qia Trans. Tanyakan apa saja tentang layanan transportasi kami.
                   </p>
                 </div>
               ) : (
