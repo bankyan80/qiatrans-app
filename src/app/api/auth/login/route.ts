@@ -25,7 +25,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Compare password (plaintext for now — upgrade to bcrypt for production)
     if (user.password !== password) {
       return NextResponse.json(
         { success: false, error: 'Email atau password salah' },
@@ -52,12 +51,11 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Set HTTP-only cookie
     response.cookies.set('qia-trans-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+      maxAge: 60 * 60 * 24 * 7,
       path: '/',
     });
 
