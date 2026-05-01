@@ -517,8 +517,8 @@ function VehicleFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{isEditing ? 'Edit Kendaraan' : 'Tambah Kendaraan Baru'}</DialogTitle>
           <DialogDescription>
             {isEditing
@@ -527,7 +527,7 @@ function VehicleFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 min-h-0 overflow-y-auto -mx-6 px-6">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
 
           {/* Upload Foto */}
@@ -812,7 +812,8 @@ function VehicleFormDialog({
         </div>
         </div>
 
-        <DialogFooter>
+        <Separator className="shrink-0" />
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
             Batal
           </Button>
