@@ -24,6 +24,11 @@ import {
   Send,
   LogOut,
   ChevronRight,
+  LogIn,
+  Eye,
+  EyeOff,
+  Loader2,
+  ArrowRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -48,6 +53,15 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
 import { useAppStore } from '@/lib/store';
 import type { ViewName } from '@/lib/types';
 import { BookingView } from '@/components/views/booking-view';
@@ -264,16 +278,26 @@ export function AppShell() {
     chatMessages,
     addChatMessage,
     clearChatMessages,
+    login,
+    logout,
   } = useAppStore();
 
   const { theme, setTheme } = useTheme();
   const [chatInput, setChatInput] = useState('');
+  const [loginDialogOpen, setLoginDialogOpen] = useState(false);
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const mounted = useSyncExternalStore(
     (_onStoreChange) => () => {},
     () => true,
     () => false,
   );
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const currentUser = useAppStore((s) => s.currentUser);
 
   // Responsive detection
   useEffect(() => {
@@ -282,6 +306,22 @@ export function AppShell() {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, [setIsMobile]);
+
+  // Fetch current user on mount (optional — dashboard works without login)
+  useEffect(() => {
+    async function fetchUser() {
+      try {
+        const res = await fetch('/api/auth/me');
+        const json = await res.json();
+        if (json.success && json.data) {
+          login(json.data);
+        }
+      } catch {
+        // Not logged in — that's OK, user can still browse
+      }
+    }
+    fetchUser();
+  }, [login]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -308,20 +348,78 @@ export function AppShell() {
     }
   };
 
+  const handleLogin = async () => {
+    const { email, password } = loginForm;
+    if (!email.trim() || !password.trim()) {
+      setLoginError('Email dan password wajib diisi');
+      return;
+    }
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password: password.trim() }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setLoginError(json.error || 'Login gagal');
+        setLoginLoading(false);
+        return;
+      }
+      login(json.data);
+      setLoginDialogOpen(false);
+      setLoginForm({ email: '', password: '' });
+    } catch {
+      setLoginError('Terjadi kesalahan koneksi');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+    logout();
+    setLoggingOut(false);
+  };
+
   const toggleTheme = () => {
     setTheme(theme === 'dark' ? 'light' : 'dark');
+  };
+
+  // Get user initials
+  const userInitials = currentUser
+    ? currentUser.name
+        .split(' ')
+        .map((n) => n[0])
+        .join('')
+        .substring(0, 2)
+        .toUpperCase()
+    : '??';
+
+  const roleLabels: Record<string, string> = {
+    OWNER: 'Pemilik',
+    ADMIN: 'Admin',
+    DRIVER: 'Driver',
+    CUSTOMER: 'Pelanggan',
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* ─── Header ─── */}
-      <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
+      <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-gradient-to-r from-[#0c1a3a] via-[#122050] to-[#0c1a3a] shadow-lg shadow-blue-950/30">
         <div className="flex h-14 items-center gap-2 px-4 lg:px-6">
           {/* Mobile menu button */}
           <Button
             variant="ghost"
             size="icon"
-            className="lg:hidden shrink-0"
+            className="lg:hidden shrink-0 hover:bg-white/10 text-white/80 hover:text-white"
             onClick={() => setSidebarOpen(true)}
           >
             <Menu className="w-5 h-5" />
@@ -335,7 +433,7 @@ export function AppShell() {
               alt="Qia Trans Manajemen"
               className="w-7 h-7 rounded-lg object-cover"
             />
-            <span className="text-sm font-bold text-foreground">Qia Trans Manajemen</span>
+            <span className="text-sm font-bold text-white">Qia Trans Manajemen</span>
           </div>
 
           {/* Spacer */}
@@ -346,7 +444,7 @@ export function AppShell() {
             {/* Dark mode toggle */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={toggleTheme}>
+                <Button variant="ghost" size="icon" onClick={toggleTheme} className="text-white/80 hover:bg-white/10 hover:text-white">
                   {mounted && theme === 'dark' ? (
                     <Sun className="w-5 h-5" />
                   ) : (
@@ -365,7 +463,7 @@ export function AppShell() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="relative">
+                    <Button variant="ghost" size="icon" className="relative text-white/80 hover:bg-white/10 hover:text-white">
                       <Bell className="w-5 h-5" />
                       {unreadCount > 0 && (
                         <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center w-4.5 h-4.5 rounded-full bg-destructive text-[10px] font-bold text-white">
@@ -422,61 +520,83 @@ export function AppShell() {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* User avatar dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full">
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src="" alt="User" />
-                    <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                      AD
-                    </AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>
-                  <div className="flex flex-col gap-0.5">
-                    <p className="text-sm font-medium">Admin Rental</p>
-                    <p className="text-xs text-muted-foreground">admin@Qiatrans.id</p>
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem className="cursor-pointer">
-                    <UserCircle className="w-4 h-4" />
-                    Profil
+            {/* User avatar dropdown OR Login button */}
+            {currentUser ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="rounded-full hover:bg-white/10">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={currentUser.avatar || ''} alt={currentUser.name || 'User'} />
+                      <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                        {userInitials}
+                      </AvatarFallback>
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>
+                    <div className="flex flex-col gap-0.5">
+                      <p className="text-sm font-medium">{currentUser.name}</p>
+                      <p className="text-xs text-muted-foreground">{currentUser.email}</p>
+                      {currentUser.role && (
+                        <span className="text-[10px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded w-fit mt-0.5">
+                          {roleLabels[currentUser.role] || currentUser.role}
+                        </span>
+                      )}
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem className="cursor-pointer">
+                      <UserCircle className="w-4 h-4" />
+                      Profil
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="cursor-pointer"
+                      onClick={() => setCurrentView('settings')}
+                    >
+                      <Settings className="w-4 h-4" />
+                      Pengaturan
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="cursor-pointer" onClick={toggleTheme}>
+                    {mounted && theme === 'dark' ? (
+                      <Sun className="w-4 h-4" />
+                    ) : (
+                      <Moon className="w-4 h-4" />
+                    )}
+                    {mounted && theme === 'dark' ? 'Mode Terang' : 'Mode Gelap'}
+                    <div className="ml-auto">
+                      <Switch
+                        checked={mounted ? theme === 'dark' : false}
+                        onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
+                      />
+                    </div>
                   </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
+                    variant="destructive"
                     className="cursor-pointer"
-                    onClick={() => setCurrentView('settings')}
+                    onClick={handleLogout}
+                    disabled={loggingOut}
                   >
-                    <Settings className="w-4 h-4" />
-                    Pengaturan
+                    <LogOut className="w-4 h-4" />
+                    {loggingOut ? 'Keluar...' : 'Keluar'}
                   </DropdownMenuItem>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="cursor-pointer" onClick={toggleTheme}>
-                  {mounted && theme === 'dark' ? (
-                    <Sun className="w-4 h-4" />
-                  ) : (
-                    <Moon className="w-4 h-4" />
-                  )}
-                  {mounted && theme === 'dark' ? 'Mode Terang' : 'Mode Gelap'}
-                  <div className="ml-auto">
-                    <Switch
-                      checked={mounted ? theme === 'dark' : false}
-                      onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
-                    />
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" className="cursor-pointer">
-                  <LogOut className="w-4 h-4" />
-                  Keluar
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button
+                variant="default"
+                size="sm"
+                className="gap-1.5 bg-white text-[#0c1a3a] hover:bg-white/90 font-semibold"
+                onClick={() => setLoginDialogOpen(true)}
+              >
+                <LogIn className="w-4 h-4" />
+                <span className="hidden sm:inline">Login</span>
+              </Button>
+            )}
           </div>
         </div>
       </header>
@@ -684,6 +804,74 @@ export function AppShell() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ─── Login Dialog ─── */}
+      <Dialog open={loginDialogOpen} onOpenChange={setLoginDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-center text-xl">Masuk ke Akun</DialogTitle>
+            <DialogDescription className="text-center">
+              Masukkan email dan password untuk melanjutkan
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {loginError && (
+              <Alert variant="destructive">
+                <AlertDescription className="text-sm">{loginError}</AlertDescription>
+              </Alert>
+            )}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Email</label>
+              <Input
+                type="email"
+                placeholder="admin@qiatrans.id"
+                value={loginForm.email}
+                onChange={(e) => setLoginForm((p) => ({ ...p, email: e.target.value }))}
+                disabled={loginLoading}
+                className="h-10"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Password</label>
+              <div className="relative">
+                <Input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Masukkan password"
+                  value={loginForm.password}
+                  onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
+                  disabled={loginLoading}
+                  className="h-10 pr-10"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleLogin(); }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+            <Button
+              onClick={handleLogin}
+              disabled={loginLoading}
+              className="w-full h-10"
+            >
+              {loginLoading ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Memproses...</>
+              ) : (
+                <><span>Masuk</span><ArrowRight className="w-4 h-4 ml-2" /></>
+              )}
+            </Button>
+            <div className="p-3 rounded-lg bg-muted/50 border text-center">
+              <p className="text-[11px] text-muted-foreground">
+                <span className="font-medium">Admin:</span> admin@qiatrans.id
+              </p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

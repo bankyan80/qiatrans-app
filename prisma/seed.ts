@@ -22,10 +22,10 @@ async function main() {
   // ==========================================
   const owner = await prisma.user.create({
     data: {
-      email: 'owner@quatrans.id',
+      email: 'owner@qiatrans.id',
       name: 'Budi Santoso',
       phone: '+62812345678',
-      password: 'hashed_password_owner',
+      password: 'owner123',
       role: 'OWNER',
       avatar: null,
       isVerified: true,
@@ -34,10 +34,10 @@ async function main() {
 
   const admin = await prisma.user.create({
     data: {
-      email: 'admin@quatrans.id',
+      email: 'admin@qiatrans.id',
       name: 'Sari Dewi',
       phone: '+62823456789',
-      password: 'hashed_password_admin',
+      password: 'admin123',
       role: 'ADMIN',
       avatar: null,
       isVerified: true,
@@ -46,10 +46,10 @@ async function main() {
 
   const customer = await prisma.user.create({
     data: {
-      email: 'customer@quatrans.id',
+      email: 'customer@qiatrans.id',
       name: 'Andi Pratama',
       phone: '+62834567890',
-      password: 'hashed_password_customer',
+      password: 'customer123',
       role: 'CUSTOMER',
       avatar: null,
       isVerified: true,
@@ -62,7 +62,7 @@ async function main() {
       email: 'rina@mail.com',
       name: 'Rina Wati',
       phone: '+62845678901',
-      password: 'hashed_password_rina',
+      password: 'rina123',
       role: 'CUSTOMER',
       avatar: null,
       isVerified: true,
@@ -74,7 +74,7 @@ async function main() {
       email: 'doni@mail.com',
       name: 'Doni Saputra',
       phone: '+62856789012',
-      password: 'hashed_password_doni',
+      password: 'doni123',
       role: 'CUSTOMER',
       avatar: null,
       isVerified: false,
@@ -88,10 +88,10 @@ async function main() {
   // ==========================================
   const driverUser1 = await prisma.user.create({
     data: {
-      email: 'driver1@quatrans.id',
+      email: 'driver1@qiatrans.id',
       name: 'Hendra Wijaya',
       phone: '+62867890123',
-      password: 'hashed_password_driver1',
+      password: 'driver123',
       role: 'DRIVER',
       avatar: null,
       isVerified: true,
@@ -100,10 +100,10 @@ async function main() {
 
   const driverUser2 = await prisma.user.create({
     data: {
-      email: 'driver2@quatrans.id',
+      email: 'driver2@qiatrans.id',
       name: 'Joko Susilo',
       phone: '+62878901234',
-      password: 'hashed_password_driver2',
+      password: 'driver123',
       role: 'DRIVER',
       avatar: null,
       isVerified: true,
@@ -431,8 +431,8 @@ async function main() {
         totalPrice: 400000,
         status: 'COMPLETED',
         withDriver: false,
-        pickupLocation: 'Outlet Qua Trans',
-        returnLocation: 'Outlet Qua Trans',
+        pickupLocation: 'Outlet Qia Trans',
+        returnLocation: 'Outlet Qia Trans',
         notes: null,
       },
     }),
@@ -709,7 +709,7 @@ async function main() {
         type: 'CONTRACT',
         content: JSON.stringify({
           contractNo: 'RC-2024-0001',
-          terms: 'Perjanjian sewa mobil antara Qua Trans Manajemen dan Andi Pratama...',
+          terms: 'Perjanjian sewa mobil antara Qia Trans Manajemen dan Andi Pratama...',
           signedAt: new Date(today.getTime() - 2 * 86400000).toISOString(),
         }),
         digitalSignature: null,

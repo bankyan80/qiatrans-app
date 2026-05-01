@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useSyncExternalStore } from 'react';
 import { motion } from 'framer-motion';
 import {
   Car,
@@ -270,7 +270,7 @@ const containerVariants = {
 
 const itemVariants = {
   hidden: { opacity: 0, y: 16 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' as const } },
 };
 
 // ── Custom Tooltip for Chart ────────────────────────────────────────
@@ -467,6 +467,12 @@ function EmptyState({ message, onRetry }: { message: string; onRetry: () => void
 export function DashboardView() {
   const { setDashboardStats, setCurrentView } = useAppStore();
 
+  const mounted = useSyncExternalStore(
+    (_onStoreChange) => () => {},
+    () => true,
+    () => false,
+  );
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -481,6 +487,11 @@ export function DashboardView() {
   const [pendingBookings, setPendingBookings] = useState(0);
   const [totalVehicles, setTotalVehicles] = useState(0);
   const [maintenanceAlerts, setMaintenanceAlerts] = useState<ApiMaintenanceAlert[]>([]);
+  const [fleetVehicles, setFleetVehicles] = useState<Array<{
+    id: string; brand: string; model: string; plateNumber: string; year: number;
+    category: string; status: string; dailyRate: number; color: string; imageUrl: string | null;
+    fuelType: string; transmission: string; seats: number;
+  }>>([]);
 
   const [recentBookings] = useState<Booking[]>(getMockRecentBookings());
   const [chartData] = useState<ChartDataPoint[]>(getMockChartData());
@@ -501,6 +512,15 @@ export function DashboardView() {
       if (!json.success || !json.data) throw new Error('Invalid response');
 
       const { vehicles, bookings, revenue, maintenanceAlerts: alerts } = json.data;
+
+      // Fetch fleet vehicles for gallery
+      try {
+        const fleetRes = await fetch('/api/vehicles?limit=12');
+        const fleetJson = await fleetRes.json();
+        if (fleetJson.success && fleetJson.data) {
+          setFleetVehicles(fleetJson.data);
+        }
+      } catch { /* ignore */ }
 
       setTotalVehicles(vehicles.total);
       setAvailableVehicles(vehicles.available);
@@ -650,9 +670,9 @@ export function DashboardView() {
       <motion.div variants={itemVariants} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight lg:text-3xl">
-            {getGreeting()}, Admin! 👋
+            {mounted ? `${getGreeting()}, Admin! 👋` : 'Selamat Datang, Admin! 👋'}
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{getIndonesianDate()}</p>
+          <p className="text-sm text-muted-foreground mt-0.5">{mounted ? getIndonesianDate() : ''}</p>
         </div>
         <Button
           variant="outline"
@@ -732,56 +752,91 @@ export function DashboardView() {
             )}
           </div>
 
-          {/* ─── Section 2: Revenue Chart ─── */}
+          {/* ─── Section 2: Fleet Gallery ─── */}
           <motion.div variants={itemVariants}>
-            {loading ? (
-              <ChartSkeleton />
-            ) : (
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-base lg:text-lg">Statistik Pendapatan Mingguan</CardTitle>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Total minggu ini: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrency(weeklyRevenue)}</span>
-                      </p>
-                    </div>
-                    <div className="hidden sm:flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 dark:bg-emerald-900/20">
-                      <TrendingUp className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                      <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">+18%</span>
-                    </div>
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base lg:text-lg">Armada Kami</CardTitle>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {fleetVehicles.length} kendaraan tersedia untuk disewa
+                    </p>
                   </div>
-                </CardHeader>
-                <CardContent className="px-2 pb-4 sm:px-4">
-                  <div className="h-64 lg:h-72">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={chartData} margin={{ top: 8, right: 4, left: -12, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} className="opacity-30" />
-                        <XAxis
-                          dataKey="day"
-                          axisLine={false}
-                          tickLine={false}
-                          tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                        />
-                        <YAxis
-                          axisLine={false}
-                          tickLine={false}
-                          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                          tickFormatter={(value: number) => `${(value / 1000000).toFixed(1)}jt`}
-                        />
-                        <Tooltip content={<CustomChartTooltip />} cursor={{ fill: 'hsl(var(--muted) / 0.4)' }} />
-                        <Bar
-                          dataKey="revenue"
-                          fill="hsl(var(--primary))"
-                          radius={[6, 6, 0, 0]}
-                          maxBarSize={48}
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => navigateTo('fleet')}
+                  >
+                    Lihat Semua
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                {fleetVehicles.length === 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="space-y-2">
+                        <Skeleton className="h-28 w-full rounded-lg" />
+                        <Skeleton className="h-4 w-3/4" />
+                        <Skeleton className="h-3 w-1/2" />
+                      </div>
+                    ))}
                   </div>
-                </CardContent>
-              </Card>
-            )}
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                    {fleetVehicles.slice(0, 8).map((v, idx) => {
+                      const statusStyle = v.status === 'AVAILABLE'
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
+                        : v.status === 'RENTED'
+                        ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400'
+                        : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400';
+                      return (
+                        <motion.div
+                          key={v.id}
+                          initial={{ opacity: 0, y: 12 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: idx * 0.05, duration: 0.3 }}
+                          className="group rounded-xl border overflow-hidden hover:shadow-md transition-shadow cursor-pointer"
+                          onClick={() => navigateTo('fleet')}
+                        >
+                          {/* Image */}
+                          <div className="relative h-28 sm:h-32 overflow-hidden bg-muted">
+                            {v.imageUrl ? (
+                              <img
+                                src={v.imageUrl}
+                                alt={`${v.brand} ${v.model}`}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center">
+                                <Car className="w-10 h-10 text-white/30" />
+                              </div>
+                            )}
+                            <div className="absolute bottom-0 inset-x-0 h-12 bg-gradient-to-t from-black/50 to-transparent" />
+                            <div className="absolute top-2 right-2">
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${statusStyle}`}>
+                                {v.status === 'AVAILABLE' ? 'Tersedia' : v.status === 'RENTED' ? 'Disewa' : 'Servis'}
+                              </span>
+                            </div>
+                          </div>
+                          {/* Info */}
+                          <div className="p-2.5 space-y-1">
+                            <p className="text-sm font-semibold truncate">{v.brand} {v.model}</p>
+                            <p className="text-[11px] text-muted-foreground truncate">{v.plateNumber} &middot; {v.year}</p>
+                            <p className="text-xs font-semibold text-primary">
+                              {formatCurrency(v.dailyRate)}<span className="font-normal text-muted-foreground">/hari</span>
+                            </p>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </motion.div>
 
           {/* ─── Section 3: Two-column ─── */}
@@ -919,7 +974,7 @@ export function DashboardView() {
             </Card>
           </motion.div>
 
-          {/* ─── Revenue Summary Cards ─── */}
+          {/* ─── Summary Cards ─── */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <motion.div variants={itemVariants}>
               <Card className="overflow-hidden">
@@ -941,11 +996,11 @@ export function DashboardView() {
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
                     <div className="rounded-lg bg-blue-100 dark:bg-blue-900/30 p-2">
-                      <CalendarCheck className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      <Car className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground">Pendapatan Minggu Ini</p>
-                      <p className="text-lg font-bold">{formatCurrency(weeklyRevenue)}</p>
+                      <p className="text-xs text-muted-foreground">Total Armada</p>
+                      <p className="text-lg font-bold">{totalVehicles} <span className="text-sm font-normal text-muted-foreground">kendaraan</span></p>
                     </div>
                   </div>
                 </CardContent>
@@ -956,7 +1011,7 @@ export function DashboardView() {
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
                     <div className="rounded-lg bg-orange-100 dark:bg-orange-900/30 p-2">
-                      <Wallet className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                      <CalendarCheck className="h-4 w-4 text-orange-600 dark:text-orange-400" />
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Booking Aktif</p>
