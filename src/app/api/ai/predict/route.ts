@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
 
     const zai = await ZAI.create();
 
-    const prompt = `You are an AI analytics assistant for Qua Trans Manajemen, a transportation and car rental company in Indonesia. Analyze the following data and provide actionable insights.
+    const prompt = `You are an AI analytics assistant for Qia Trans Manajemen, a transportation and car rental company in Indonesia. Analyze the following data and provide actionable insights.
 
 Current vehicle fleet:
 ${vehicles.map((v) => `${v.brand} ${v.model} (${v.category}) - Rate: Rp ${v.dailyRate.toLocaleString('id-ID')}/day, Status: ${v.status}, Total Bookings: ${v._count.bookings}`).join('\n')}

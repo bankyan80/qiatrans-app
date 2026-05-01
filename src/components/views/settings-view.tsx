@@ -112,10 +112,10 @@ export function SettingsView() {
   const { theme, setTheme } = useTheme();
 
   // ── Company Profile ──
-  const [companyName, setCompanyName] = useState('Qua Trans Manajemen');
+  const [companyName, setCompanyName] = useState('Qia Trans Manajemen');
   const [companyAddress, setCompanyAddress] = useState('Jl. Gatot Subroto No. 123, Jakarta Selatan');
   const [companyPhone, setCompanyPhone] = useState('021-5551234');
-  const [companyEmail, setCompanyEmail] = useState('info@quatrans.id');
+  const [companyEmail, setCompanyEmail] = useState('info@Qiatrans.id');
   const [savingCompany, setSavingCompany] = useState(false);
 
   // ── Booking Settings ──
@@ -134,7 +134,7 @@ export function SettingsView() {
   const [enableCash, setEnableCash] = useState(true);
   const [bankName, setBankName] = useState('BCA');
   const [bankAccount, setBankAccount] = useState('1234567890');
-  const [bankHolder, setBankHolder] = useState('PT Qua Trans Manajemen Indonesia');
+  const [bankHolder, setBankHolder] = useState('PT Qia Trans Manajemen Indonesia');
   const [paymentGateway, setPaymentGateway] = useState('midtrans');
   const [savingPayment, setSavingPayment] = useState(false);
 
@@ -180,7 +180,7 @@ export function SettingsView() {
       <motion.div variants={itemVariants} className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight lg:text-3xl">Pengaturan</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Konfigurasi aplikasi Qua Trans</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Konfigurasi aplikasi Qia Trans</p>
         </div>
       </motion.div>
 

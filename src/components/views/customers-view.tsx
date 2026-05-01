@@ -293,7 +293,7 @@ function CustomerProfileSheet({
       return;
     }
     const message = encodeURIComponent(
-      `Halo ${customer.name}! 🚗\n\nTerima kasih telah menjadi pelanggan setia Qua Trans Manajemen!\nAnda mendapat diskon ${customer.stats.loyaltyDiscount}% sebagai pelanggan ${customer.stats.loyaltyStatus}.\n\nHubungi kami untuk info lebih lanjut!`
+      `Halo ${customer.name}! 🚗\n\nTerima kasih telah menjadi pelanggan setia Qia Trans Manajemen!\nAnda mendapat diskon ${customer.stats.loyaltyDiscount}% sebagai pelanggan ${customer.stats.loyaltyStatus}.\n\nHubungi kami untuk info lebih lanjut!`
     );
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
     toast.success('Membuka WhatsApp...');
@@ -643,7 +643,7 @@ export function CustomersView() {
       return;
     }
     const message = encodeURIComponent(
-      `Halo ${customer.name}! 🎉\n\nAnda mendapatkan promo spesial dari Qua Trans Manajemen!\nDiskon ${customer.loyaltyDiscount}% untuk sewa selanjutnya.\n\nSegera hubungi kami!`
+      `Halo ${customer.name}! 🎉\n\nAnda mendapatkan promo spesial dari Qia Trans Manajemen!\nDiskon ${customer.loyaltyDiscount}% untuk sewa selanjutnya.\n\nSegera hubungi kami!`
     );
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
     toast.success('Membuka WhatsApp untuk mengirim promo...');
