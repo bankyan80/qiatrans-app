@@ -453,8 +453,9 @@ export function AppShell() {
       login(json.data);
       setLoginDialogOpen(false);
       setLoginForm({ email: '', password: '' });
-    } catch {
-      setLoginError('Terjadi kesalahan koneksi');
+    } catch (err) {
+      console.error('Login fetch error:', err);
+      setLoginError('Terjadi kesalahan koneksi. Periksa jaringan dan coba lagi.');
     } finally {
       setLoginLoading(false);
     }
