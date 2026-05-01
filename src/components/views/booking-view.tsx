@@ -1370,7 +1370,7 @@ function BookingDetailSheet({
               Dibuat: {formatDateIndonesian(booking.createdAt)}
             </p>
           </div>
-        </ScrollArea>
+        </div>
 
         {/* Action buttons */}
         {(canConfirm || canStart || canComplete || canCancel) && (
