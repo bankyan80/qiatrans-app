@@ -14,6 +14,9 @@ import {
   Users as UsersIcon,
   Settings2,
   X,
+  Camera,
+  ImageIcon,
+  Upload,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -146,6 +149,7 @@ interface VehicleFormData {
   fuelType: string;
   transmission: string;
   seats: string;
+  imageUrl: string;
   notes: string;
   status: VehicleStatus;
 }
@@ -163,6 +167,7 @@ const emptyForm: VehicleFormData = {
   fuelType: 'BENSIN',
   transmission: 'AUTOMATIC',
   seats: '5',
+  imageUrl: '',
   notes: '',
   status: 'AVAILABLE',
 };
@@ -181,6 +186,7 @@ function vehicleToForm(v: Vehicle): VehicleFormData {
     fuelType: v.fuelType || 'BENSIN',
     transmission: v.transmission || 'AUTOMATIC',
     seats: v.seats?.toString() || '5',
+    imageUrl: v.imageUrl || '',
     notes: v.notes || '',
     status: v.status,
   };
@@ -276,9 +282,19 @@ function VehicleCard({
       className="group"
     >
       <Card className="overflow-hidden hover:shadow-lg transition-shadow duration-200">
-        {/* Image placeholder */}
-        <div className={`relative h-40 bg-gradient-to-br ${catColor.gradient} flex items-center justify-center overflow-hidden`}>
-          <Car className="w-16 h-16 text-white/30" strokeWidth={1.2} />
+        {/* Image or gradient placeholder */}
+        <div className="relative h-40 overflow-hidden">
+          {vehicle.imageUrl ? (
+            <img
+              src={vehicle.imageUrl}
+              alt={`${vehicle.brand} ${vehicle.model}`}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className={`w-full h-full bg-gradient-to-br ${catColor.gradient} flex items-center justify-center`}>
+              <Car className="w-16 h-16 text-white/30" strokeWidth={1.2} />
+            </div>
+          )}
           <div className="absolute top-3 left-3">
             <Badge className={`${catColor.badge} border text-[11px] font-semibold`}>
               {vehicle.category}
@@ -475,6 +491,21 @@ function VehicleFormDialog({
     [],
   );
 
+  const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Ukuran foto maksimal 2MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      setField('imageUrl', result);
+    };
+    reader.readAsDataURL(file);
+  }, [setField]);
+
   const handleSubmit = () => {
     const validationErrors = validateForm(form);
     if (Object.keys(validationErrors).length > 0) {
@@ -498,6 +529,70 @@ function VehicleFormDialog({
 
         <div className="flex-1 min-h-0 overflow-y-auto -mx-6 px-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+
+          {/* Upload Foto */}
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Foto Kendaraan</Label>
+            <div className="relative">
+              {form.imageUrl ? (
+                <div className="relative group rounded-xl overflow-hidden border">
+                  <img
+                    src={form.imageUrl}
+                    alt="Foto kendaraan"
+                    className="w-full h-48 object-cover"
+                  />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => {
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = 'image/*';
+                        input.onchange = (e) => handleImageUpload(e as any);
+                        input.click();
+                      }}
+                    >
+                      <Camera className="w-4 h-4" />
+                      Ganti
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => setField('imageUrl', '')}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Hapus
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className="flex flex-col items-center justify-center gap-2 h-36 rounded-xl border-2 border-dashed border-muted-foreground/25 bg-muted/30 cursor-pointer hover:bg-muted/50 hover:border-primary/40 transition-colors"
+                  onClick={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.onchange = (e) => handleImageUpload(e as any);
+                    input.click();
+                  }}
+                >
+                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                    <Upload className="w-5 h-5 text-muted-foreground" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-muted-foreground">Klik untuk upload foto</p>
+                    <p className="text-xs text-muted-foreground/70">JPG, PNG, max 2MB</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Merk */}
           <div className="space-y-1.5">
             <Label htmlFor="brand">Merk <span className="text-destructive">*</span></Label>
@@ -800,6 +895,7 @@ export function FleetView() {
           transmission: data.transmission || null,
           seats: parseInt(data.seats, 10) || 5,
           notes: data.notes.trim() || null,
+          imageUrl: data.imageUrl.trim() || null,
           status: 'AVAILABLE' as VehicleStatus,
         };
 
@@ -847,6 +943,7 @@ export function FleetView() {
           transmission: data.transmission || null,
           seats: parseInt(data.seats, 10) || 5,
           notes: data.notes.trim() || null,
+          imageUrl: data.imageUrl.trim() || null,
           status: data.status,
         };
 
