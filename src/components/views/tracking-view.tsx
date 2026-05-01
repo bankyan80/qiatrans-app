@@ -163,7 +163,10 @@ const STATUS_CONFIG = {
   offline: { label: 'Offline', color: 'bg-red-500', badgeStyle: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border-red-200 dark:border-red-800' },
 } as const;
 
-// ── Real Map Component (Leaflet) ─────────────────────────────────────
+// ── Real Map Component (Leaflet via CDN) ─────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const getL = (): any => (typeof window !== 'undefined' ? (window as any).L : undefined);
 
 function MapWrapper({
   vehicles,
@@ -176,196 +179,170 @@ function MapWrapper({
   onSelectVehicle: (id: string) => void;
   satelliteView: boolean;
 }) {
-  const [mapInstance, setMapInstance] = useState<any>(null);
-  const [leafletLoaded, setLeafletLoaded] = useState(false);
-  const [tileLayer, setTileLayer] = useState<any>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const mapRef = useRef<any>(null);
+  const tileRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Dynamically import Leaflet (only on client)
+  // Load Leaflet CSS + JS from CDN (only once)
   useEffect(() => {
-    import('leaflet').then((L) => {
-      setLeafletLoaded(true);
+    if (typeof window === 'undefined') return;
+    if (getL()) { setMapReady(true); return; }
 
-      // Fix default marker icon issue
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-      });
-    });
+    // Inject CSS
+    if (!document.getElementById('leaflet-css')) {
+      const css = document.createElement('link');
+      css.id = 'leaflet-css';
+      css.rel = 'stylesheet';
+      css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(css);
+    }
+
+    // Inject JS
+    const existing = document.getElementById('leaflet-js') as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener('load', () => setMapReady(true));
+      existing.addEventListener('error', () => console.error('Leaflet CDN failed'));
+      if ((window as any).L) setMapReady(true);
+      return;
+    }
+
+    const js = document.createElement('script');
+    js.id = 'leaflet-js';
+    js.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    js.onload = () => setMapReady(true);
+    js.onerror = () => console.error('Leaflet CDN load failed');
+    document.body.appendChild(js);
   }, []);
 
-  // Initialize map
+  // Initialize map once Leaflet is ready
   useEffect(() => {
-    if (!leafletLoaded || !containerRef.current || mapInstance) return;
+    if (!mapReady || !containerRef.current || mapRef.current) return;
+    const L = getL();
+    if (!L) return;
 
-    import('leaflet').then((L) => {
-      const map = L.map(containerRef.current!, {
-        center: [-6.2088, 106.8456],
-        zoom: 13,
-        zoomControl: false,
-        attributionControl: true,
-      });
-
-      // Add zoom control to top-left
-      L.control.zoom({ position: 'topleft' }).addTo(map);
-
-      // Add tile layer
-      const tiles = L.tileLayer(
-        'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-        {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-          maxZoom: 19,
+    // Inject pulse animation style
+    if (!document.getElementById('leaflet-pulse-style')) {
+      const style = document.createElement('style');
+      style.id = 'leaflet-pulse-style';
+      style.textContent = `
+        @keyframes pulse-ring {
+          0% { transform: scale(1); opacity: 0.6; }
+          50% { transform: scale(1.8); opacity: 0; }
+          100% { transform: scale(1); opacity: 0.6; }
         }
-      ).addTo(map);
-
-      setTileLayer(tiles);
-      setMapInstance(map);
-
-      // Fix map size after mount
-      setTimeout(() => map.invalidateSize(), 100);
-    });
-
-    return () => {
-      if (mapInstance) {
-        mapInstance.remove();
-      }
-    };
-  }, [leafletLoaded]);
-
-  // Toggle satellite / normal view
-  useEffect(() => {
-    if (!mapInstance || !leafletLoaded) return;
-
-    import('leaflet').then((L) => {
-      if (tileLayer) {
-        mapInstance.removeLayer(tileLayer);
-      }
-
-      const newTileUrl = satelliteView
-        ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-      const newTiles = L.tileLayer(newTileUrl, {
-        attribution: satelliteView
-          ? '&copy; <a href="https://www.esri.com/">Esri</a>'
-          : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19,
-      }).addTo(mapInstance);
-
-      setTileLayer(newTiles);
-    });
-  }, [satelliteView, mapInstance, leafletLoaded]);
-
-  // Update markers when vehicles change
-  useEffect(() => {
-    if (!mapInstance || !leafletLoaded) return;
-
-    import('leaflet').then((L) => {
-      // Remove existing markers
-      mapInstance.eachLayer((layer: any) => {
-        if (layer instanceof L.Marker) {
-          mapInstance.removeLayer(layer);
-        }
-      });
-
-      vehicles.forEach((v) => {
-        const isSelected = v.vehicle.id === selectedId;
-        const statusCfg = STATUS_CONFIG[v.status];
-
-        // Create custom icon
-        const iconHtml = `
-          <div style="position:relative; width:${isSelected ? 40 : 32}px; height:${isSelected ? 40 : 32}px;">
-            ${v.status === 'moving' ? `<div style="position:absolute; inset:-6px; border-radius:50%; background:rgba(16,185,129,0.3); animation: pulse-ring 2s infinite;"></div>` : ''}
-            <div style="
-              width:${isSelected ? 40 : 32}px;
-              height:${isSelected ? 40 : 32}px;
-              border-radius:50%;
-              background:${statusCfg.color};
-              display:flex;
-              align-items:center;
-              justify-content:center;
-              box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-              ${isSelected ? 'border: 3px solid white; box-shadow: 0 0 0 2px rgba(255,255,255,0.3), 0 2px 8px rgba(0,0,0,0.3);' : ''}
-              transition: all 0.2s;
-            ">
-              <svg xmlns="http://www.w3.org/2000/svg" width="${isSelected ? 18 : 14}" height="${isSelected ? 18 : 14}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"/>
-                <circle cx="6.5" cy="16.5" r="2.5"/>
-                <circle cx="16.5" cy="16.5" r="2.5"/>
-              </svg>
-            </div>
-          </div>
-        `;
-
-        const customIcon = L.divIcon({
-          html: iconHtml,
-          className: 'custom-vehicle-marker',
-          iconSize: [isSelected ? 40 : 32, isSelected ? 40 : 32],
-          iconAnchor: [isSelected ? 20 : 16, isSelected ? 20 : 16],
-        });
-
-        const marker = L.marker([v.lat, v.lng], { icon: customIcon })
-          .addTo(mapInstance)
-          .on('click', () => onSelectVehicle(v.vehicle.id));
-
-        // Add popup
-        marker.bindPopup(`
-          <div style="font-family: system-ui, -apple-system, sans-serif; min-width: 180px; padding: 4px 0;">
-            <div style="font-weight: 700; font-size: 13px; margin-bottom: 4px;">${v.vehicle.brand} ${v.vehicle.model}</div>
-            <div style="font-size: 11px; color: #666; margin-bottom: 6px;">${v.vehicle.plateNumber}</div>
-            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-              <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${statusCfg.color};"></span>
-              <span style="font-size: 11px; font-weight: 600; color:${v.status === 'moving' ? '#059669' : v.status === 'parked' ? '#d97706' : '#dc2626'}">${statusCfg.label}</span>
-              ${v.speed > 0 ? `<span style="font-size: 11px; color: #888;">${v.speed} km/h</span>` : ''}
-            </div>
-            <div style="font-size: 10px; color: #999;">${v.location}</div>
-            <div style="font-size: 10px; color: #bbb; margin-top: 2px;">Update: ${v.lastUpdate}</div>
-          </div>
-        `);
-
-        // Open popup if selected
-        if (isSelected) {
-          marker.openPopup();
-        }
-      });
-
-      // Add pulse animation style if not exists
-      if (!document.getElementById('leaflet-pulse-style')) {
-        const style = document.createElement('style');
-        style.id = 'leaflet-pulse-style';
-        style.textContent = `
-          @keyframes pulse-ring {
-            0% { transform: scale(1); opacity: 0.6; }
-            50% { transform: scale(1.8); opacity: 0; }
-            100% { transform: scale(1); opacity: 0.6; }
-          }
-          .custom-vehicle-marker { background: none !important; border: none !important; }
-        `;
-        document.head.appendChild(style);
-      }
-    });
-  }, [vehicles, selectedId, mapInstance, leafletLoaded]);
-
-  // Invalidate size on container resize
-  useEffect(() => {
-    if (!mapInstance) return;
-    const observer = new ResizeObserver(() => {
-      mapInstance.invalidateSize();
-    });
-    if (containerRef.current) {
-      observer.observe(containerRef.current);
+        .custom-vehicle-marker { background: none !important; border: none !important; }
+      `;
+      document.head.appendChild(style);
     }
-    return () => observer.disconnect();
-  }, [mapInstance]);
+
+    const map = L.map(containerRef.current, {
+      center: [-6.2088, 106.8456],
+      zoom: 13,
+      zoomControl: false,
+      attributionControl: true,
+    });
+
+    L.control.zoom({ position: 'topleft' }).addTo(map);
+
+    const tiles = L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19 }
+    ).addTo(map);
+
+    mapRef.current = map;
+    tileRef.current = tiles;
+    setTimeout(() => map.invalidateSize(), 150);
+
+    return () => { map.remove(); mapRef.current = null; tileRef.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady]);
+
+  // Toggle satellite / normal
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const L = getL();
+    if (!L) return;
+
+    if (tileRef.current) map.removeLayer(tileRef.current);
+
+    const url = satelliteView
+      ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+    const attr = satelliteView
+      ? '&copy; <a href="https://www.esri.com/">Esri</a>'
+      : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+
+    const tiles = L.tileLayer(url, { attribution: attr, maxZoom: 19 }).addTo(map);
+    tileRef.current = tiles;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [satelliteView, mapReady]);
+
+  // Update markers
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const L = getL();
+    if (!L) return;
+
+    // Remove old markers
+    map.eachLayer((layer: any) => {
+      if (layer instanceof L.Marker) map.removeLayer(layer);
+    });
+
+    vehicles.forEach((v) => {
+      const isSelected = v.vehicle.id === selectedId;
+      const cfg = STATUS_CONFIG[v.status];
+      const sz = isSelected ? 40 : 32;
+
+      const iconHtml = `
+        <div style="position:relative;width:${sz}px;height:${sz}px;">
+          ${v.status === 'moving' ? `<div style="position:absolute;inset:-6px;border-radius:50%;background:rgba(16,185,129,0.3);animation:pulse-ring 2s infinite;"></div>` : ''}
+          <div style="width:${sz}px;height:${sz}px;border-radius:50%;background:${cfg.color};display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.3);${isSelected ? 'border:3px solid white;box-shadow:0 0 0 2px rgba(255,255,255,0.3),0 2px 8px rgba(0,0,0,0.3);' : ''}transition:all 0.2s;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="${isSelected ? 18 : 14}" height="${isSelected ? 18 : 14}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"/>
+              <circle cx="6.5" cy="16.5" r="2.5"/><circle cx="16.5" cy="16.5" r="2.5"/>
+            </svg>
+          </div>
+        </div>`;
+
+      const icon = L.divIcon({ html: iconHtml, className: 'custom-vehicle-marker', iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2] });
+      const marker = L.marker([v.lat, v.lng], { icon }).addTo(map).on('click', () => onSelectVehicle(v.vehicle.id));
+
+      marker.bindPopup(`
+        <div style="font-family:system-ui,-apple-system,sans-serif;min-width:180px;padding:4px 0;">
+          <div style="font-weight:700;font-size:13px;margin-bottom:4px;">${v.vehicle.brand} ${v.vehicle.model}</div>
+          <div style="font-size:11px;color:#666;margin-bottom:6px;">${v.vehicle.plateNumber}</div>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${cfg.color};"></span>
+            <span style="font-size:11px;font-weight:600;color:${v.status === 'moving' ? '#059669' : v.status === 'parked' ? '#d97706' : '#dc2626'}">${cfg.label}</span>
+            ${v.speed > 0 ? `<span style="font-size:11px;color:#888;">${v.speed} km/h</span>` : ''}
+          </div>
+          <div style="font-size:10px;color:#999;">${v.location}</div>
+          <div style="font-size:10px;color:#bbb;margin-top:2px;">Update: ${v.lastUpdate}</div>
+        </div>`);
+
+      if (isSelected) marker.openPopup();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vehicles, selectedId, mapReady]);
+
+  // Resize observer
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const obs = new ResizeObserver(() => map.invalidateSize());
+    if (containerRef.current) obs.observe(containerRef.current);
+    return () => obs.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady]);
 
   return (
     <div className="relative w-full overflow-hidden rounded-xl border" style={{ aspectRatio: '16/9' }}>
       <div ref={containerRef} className="absolute inset-0 z-0" />
-
-      {/* Loading state */}
-      {!leafletLoaded && (
+      {!mapReady && (
         <div className="absolute inset-0 z-10 bg-slate-900 flex items-center justify-center">
           <div className="text-center">
             <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
