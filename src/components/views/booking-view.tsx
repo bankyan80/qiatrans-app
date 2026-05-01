@@ -1116,6 +1116,7 @@ function BookingDetailSheet({
   const remaining = booking.totalPrice - totalPaid;
 
   async function handleAddPayment() {
+    if (!booking) return;
     const amount = parseFloat(payForm.amount);
     if (!amount || amount <= 0) {
       toast.error('Masukkan nominal pembayaran');

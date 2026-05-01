@@ -123,10 +123,12 @@ export async function DELETE(
         { status: 400 }
       );
     }
-        // Delete related records first (foreign key constraints)
+
+    // Delete related records first (foreign key constraints)
     await db.payment.deleteMany({ where: { bookingId: id } });
     await db.document.deleteMany({ where: { bookingId: id } });
     await db.review.deleteMany({ where: { bookingId: id } });
+
     await db.booking.delete({ where: { id } });
 
     return NextResponse.json({ success: true, message: 'Booking deleted successfully' });
