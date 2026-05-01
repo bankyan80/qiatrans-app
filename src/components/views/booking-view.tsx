@@ -24,6 +24,8 @@ import {
   Ban,
   RotateCcw,
   IdCard,
+  Copy,
+  Info,
 } from 'lucide-react';
 
 import { Card, CardContent } from '@/components/ui/card';
@@ -1070,6 +1072,9 @@ function BookingDetailSheet({
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', method: 'CASH' as PaymentMethod, isDownPayment: true });
   const [payLoading, setPayLoading] = useState(false);
+  // Payment flow steps: 'form' | 'confirm' | 'success'
+  const [paymentStep, setPaymentStep] = useState<'form' | 'confirm' | 'success'>('form');
+  const [paymentResult, setPaymentResult] = useState<{ amount: number; method: PaymentMethod; remaining: number; fullyPaid: boolean; autoConfirmed: boolean } | null>(null);
 
   if (!booking) return null;
 
@@ -1126,6 +1131,59 @@ function BookingDetailSheet({
       toast.error(`Nominal melebihi sisa ${formatRupiah(remaining)}`);
       return;
     }
+
+    // Cash: direct record
+    if (payForm.method === 'CASH') {
+      setPayLoading(true);
+      try {
+        const res = await fetch('/api/payments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bookingId: booking.id,
+            amount,
+            method: 'CASH',
+            isDownPayment: payForm.isDownPayment,
+            status: 'SUCCESS',
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          const newRemaining = remaining - amount;
+          const fullyPaid = newRemaining <= 0;
+          let autoConfirmed = false;
+          // Auto-confirm booking if fully paid and still PENDING
+          if (fullyPaid && booking.status === 'PENDING') {
+            try {
+              await fetch(`/api/bookings/${booking.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'CONFIRMED' }),
+              });
+              autoConfirmed = true;
+            } catch { /* ignore */ }
+          }
+          setPaymentResult({ amount, method: 'CASH', remaining: newRemaining, fullyPaid, autoConfirmed });
+          setPaymentStep('success');
+          setPayForm({ amount: '', method: 'CASH', isDownPayment: true });
+          onStatusChange();
+        } else {
+          toast.error(data.error || 'Gagal mencatat pembayaran');
+        }
+      } catch {
+        toast.error('Terjadi kesalahan');
+      } finally {
+        setPayLoading(false);
+      }
+    } else {
+      // Non-cash: show confirmation step
+      setPaymentStep('confirm');
+    }
+  }
+
+  async function confirmNonCashPayment() {
+    if (!booking) return;
+    const amount = parseFloat(payForm.amount);
     setPayLoading(true);
     try {
       const res = await fetch('/api/payments', {
@@ -1141,10 +1199,23 @@ function BookingDetailSheet({
       });
       const data = await res.json();
       if (data.success) {
-        toast.success('Pembayaran berhasil dicatat!');
-        setPaymentDialogOpen(false);
+        const newRemaining = remaining - amount;
+        const fullyPaid = newRemaining <= 0;
+        let autoConfirmed = false;
+        if (fullyPaid && booking.status === 'PENDING') {
+          try {
+            await fetch(`/api/bookings/${booking.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'CONFIRMED' }),
+            });
+            autoConfirmed = true;
+          } catch { /* ignore */ }
+        }
+        setPaymentResult({ amount, method: payForm.method, remaining: newRemaining, fullyPaid, autoConfirmed });
+        setPaymentStep('success');
         setPayForm({ amount: '', method: 'CASH', isDownPayment: true });
-        onStatusChange(); // refresh booking data
+        onStatusChange();
       } else {
         toast.error(data.error || 'Gagal mencatat pembayaran');
       }
@@ -1483,62 +1554,301 @@ function BookingDetailSheet({
         )}
 
         {/* Add Payment Dialog */}
-        <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
+        <Dialog open={paymentDialogOpen} onOpenChange={(open) => {
+          if (!open) { setPaymentStep('form'); setPaymentResult(null); }
+          setPaymentDialogOpen(open);
+        }}>
           <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <CreditCard className="w-5 h-5 text-primary" />
-                Catat Pembayaran
-              </DialogTitle>
-              <DialogDescription>
-                Sisa pembayaran: {formatRupiah(remaining)}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div className="space-y-2">
-                <Label htmlFor="pay-amount">Nominal</Label>
-                <Input
-                  id="pay-amount"
-                  type="number"
-                  placeholder={formatRupiah(remaining)}
-                  value={payForm.amount}
-                  onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="pay-method">Metode Pembayaran</Label>
-                <Select
-                  value={payForm.method}
-                  onValueChange={(val) => setPayForm((f) => ({ ...f, method: val as PaymentMethod }))}
-                >
-                  <SelectTrigger id="pay-method">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="CASH">Tunai</SelectItem>
-                    <SelectItem value="BANK_TRANSFER">Transfer Bank</SelectItem>
-                    <SelectItem value="QRIS">QRIS</SelectItem>
-                    <SelectItem value="E_WALLET">E-Wallet</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="pay-dp">Uang Muka (DP)</Label>
-                <Switch
-                  id="pay-dp"
-                  checked={payForm.isDownPayment}
-                  onCheckedChange={(checked) => setPayForm((f) => ({ ...f, isDownPayment: checked }))}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setPaymentDialogOpen(false)} disabled={payLoading}>
-                Batal
-              </Button>
-              <Button onClick={handleAddPayment} disabled={!payForm.amount || payLoading}>
-                {payLoading ? 'Menyimpan...' : 'Simpan Pembayaran'}
-              </Button>
-            </DialogFooter>
+            {/* ── STEP 1: Payment Form ── */}
+            {paymentStep === 'form' && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <CreditCard className="w-5 h-5 text-primary" />
+                    Catat Pembayaran
+                  </DialogTitle>
+                  <DialogDescription>
+                    Sisa pembayaran: {formatRupiah(remaining)}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="pay-amount">Nominal</Label>
+                    <Input
+                      id="pay-amount"
+                      type="number"
+                      placeholder={formatRupiah(remaining)}
+                      value={payForm.amount}
+                      onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="pay-method">Metode Pembayaran</Label>
+                    <Select
+                      value={payForm.method}
+                      onValueChange={(val) => setPayForm((f) => ({ ...f, method: val as PaymentMethod }))}
+                    >
+                      <SelectTrigger id="pay-method">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CASH">Tunai</SelectItem>
+                        <SelectItem value="BANK_TRANSFER">Transfer Bank</SelectItem>
+                        <SelectItem value="QRIS">QRIS</SelectItem>
+                        <SelectItem value="E_WALLET">E-Wallet</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="pay-dp">Uang Muka (DP)</Label>
+                    <Switch
+                      id="pay-dp"
+                      checked={payForm.isDownPayment}
+                      onCheckedChange={(checked) => setPayForm((f) => ({ ...f, isDownPayment: checked }))}
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setPaymentDialogOpen(false)} disabled={payLoading}>
+                    Batal
+                  </Button>
+                  <Button onClick={handleAddPayment} disabled={!payForm.amount || payLoading}>
+                    {payLoading ? 'Memproses...' : 'Lanjutkan Pembayaran'}
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
+
+            {/* ── STEP 2: Non-Cash Confirmation ── */}
+            {paymentStep === 'confirm' && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <CreditCard className="w-5 h-5 text-primary" />
+                    {payForm.method === 'BANK_TRANSFER' && 'Transfer Bank'}
+                    {payForm.method === 'QRIS' && 'Pembayaran QRIS'}
+                    {payForm.method === 'E_WALLET' && 'Pembayaran E-Wallet'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Silakan lakukan pembayaran sebesar {formatRupiah(parseFloat(payForm.amount))}
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4 py-2">
+                  {/* Amount display */}
+                  <div className="rounded-lg bg-primary/10 border border-primary/20 p-4 text-center">
+                    <p className="text-xs text-muted-foreground mb-1">Total yang harus dibayar</p>
+                    <p className="text-2xl font-bold text-primary">{formatRupiah(parseFloat(payForm.amount))}</p>
+                  </div>
+
+                  {/* Bank Transfer info */}
+                  {payForm.method === 'BANK_TRANSFER' && (
+                    <div className="space-y-3 rounded-lg border p-4">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Transfer ke rekening berikut:</p>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                          <div>
+                            <p className="text-[10px] text-muted-foreground">Bank</p>
+                            <p className="text-sm font-semibold">Bank BCA</p>
+                          </div>
+                          <Badge variant="outline" className="text-xs">BCA</Badge>
+                        </div>
+                        <div className="p-3 bg-muted/50 rounded-lg">
+                          <p className="text-[10px] text-muted-foreground">Nomor Rekening</p>
+                          <div className="flex items-center justify-between mt-1">
+                            <p className="text-lg font-bold tracking-widest">8210 5437 891</p>
+                            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => {
+                              navigator.clipboard.writeText('82105437891');
+                              toast.success('Nomor rekening disalin!');
+                            }}>
+                              <Copy className="w-3 h-3" />
+                              Salin
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="p-3 bg-muted/50 rounded-lg">
+                          <p className="text-[10px] text-muted-foreground">Atas Nama</p>
+                          <p className="text-sm font-semibold mt-0.5">PT Qia Trans Manajemen Indonesia</p>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-950/20 rounded-lg">
+                        <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                          Transfer sesuai nominal di atas. Pembayaran akan dikonfirmasi setelah Anda menekan tombol &quot;Sudah Transfer&quot;.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* QRIS info */}
+                  {payForm.method === 'QRIS' && (
+                    <div className="space-y-3 rounded-lg border p-4">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">Scan QR Code berikut:</p>
+                      <div className="flex justify-center">
+                        <div className="w-48 h-48 bg-white rounded-xl border-2 border-dashed border-primary/30 flex items-center justify-center p-3">
+                          <img
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=QIATRANS-${booking.id}-${parseFloat(payForm.amount)}-${Date.now()}&color=1e40af`}
+                            alt="QRIS"
+                            className="w-full h-full"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        </div>
+                      </div>
+                      <div className="text-center space-y-1">
+                        <p className="text-xs text-muted-foreground">
+                          Gunakan aplikasi e-wallet atau mobile banking untuk scan QR di atas
+                        </p>
+                      </div>
+                      <div className="flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-950/20 rounded-lg">
+                        <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                          QRIS berlaku untuk pembayaran via GoPay, OVO, Dana, ShopeePay, LinkAja, dan aplikasi mobile banking.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* E-Wallet info */}
+                  {payForm.method === 'E_WALLET' && (
+                    <div className="space-y-3 rounded-lg border p-4">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Kirim ke nomor berikut:</p>
+                      <div className="space-y-3">
+                        <div className="p-3 bg-muted/50 rounded-lg">
+                          <p className="text-[10px] text-muted-foreground">Nomor E-Wallet</p>
+                          <div className="flex items-center justify-between mt-1">
+                            <p className="text-lg font-bold tracking-wider">0812-3456-7890</p>
+                            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => {
+                              navigator.clipboard.writeText('081234567890');
+                              toast.success('Nomor disalin!');
+                            }}>
+                              <Copy className="w-3 h-3" />
+                              Salin
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="p-3 bg-muted/50 rounded-lg">
+                          <p className="text-[10px] text-muted-foreground">Atas Nama</p>
+                          <p className="text-sm font-semibold mt-0.5">Qia Trans Admin</p>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2">
+                          {['GoPay', 'OVO', 'Dana', 'ShopeePay'].map((wallet) => (
+                            <div key={wallet} className="text-center p-2 bg-muted/30 rounded-lg">
+                              <p className="text-[10px] font-semibold text-foreground">{wallet}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-950/20 rounded-lg">
+                        <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                          Transfer sesuai nominal. Konfirmasi setelah transfer berhasil dengan menekan tombol &quot;Sudah Dibayar&quot;.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setPaymentStep('form')}>
+                    Kembali
+                  </Button>
+                  <Button
+                    onClick={confirmNonCashPayment}
+                    disabled={payLoading}
+                    className={payForm.method === 'BANK_TRANSFER' ? 'bg-blue-600 hover:bg-blue-700' : payForm.method === 'QRIS' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-orange-500 hover:bg-orange-600'}
+                  >
+                    {payLoading ? 'Memproses...' : payForm.method === 'BANK_TRANSFER' ? 'Sudah Transfer' : payForm.method === 'QRIS' ? 'Sudah Scan & Bayar' : 'Sudah Dibayar'}
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
+
+            {/* ── STEP 3: Success Popup ── */}
+            {paymentStep === 'success' && paymentResult && (
+              <>
+                <DialogHeader className="text-center sm:text-center">
+                  <div className="mx-auto mb-3">
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+                      className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center mx-auto"
+                    >
+                      <CheckCircle2 className="w-9 h-9 text-emerald-600 dark:text-emerald-400" />
+                    </motion.div>
+                  </div>
+                  <DialogTitle className="text-center">
+                    Pembayaran Berhasil!
+                  </DialogTitle>
+                  <DialogDescription className="text-center">
+                    {paymentResult.fullyPaid ? 'Pembayaran telah lunas' : 'Pembayaran berhasil dicatat'}
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3 py-2">
+                  {/* Payment summary */}
+                  <div className="rounded-lg border p-4 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Nominal Dibayar</span>
+                      <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatRupiah(paymentResult.amount)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Metode</span>
+                      <span className="font-medium">{PAYMENT_METHOD_LABELS[paymentResult.method]}</span>
+                    </div>
+                    <Separator />
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Sisa Pembayaran</span>
+                      <span className={`font-bold ${paymentResult.fullyPaid ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                        {paymentResult.fullyPaid ? 'LUNAS' : formatRupiah(paymentResult.remaining)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Auto-confirm notice */}
+                  {paymentResult.autoConfirmed && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 p-3 flex items-start gap-3"
+                    >
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                          Booking Otomatis Dikonfirmasi
+                        </p>
+                        <p className="text-xs text-emerald-600/80 dark:text-emerald-500/80 mt-0.5">
+                          Status booking telah berubah dari &quot;Menunggu&quot; menjadi &quot;Dikonfirmasi&quot; karena pembayaran sudah lunas.
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {!paymentResult.fullyPaid && (
+                    <div className="flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-950/20 rounded-lg">
+                      <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                        Sisa pembayaran {formatRupiah(paymentResult.remaining)} dapat dibayar kemudian melalui halaman detail booking ini.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter>
+                  <Button
+                    onClick={() => {
+                      setPaymentDialogOpen(false);
+                      setPaymentStep('form');
+                      setPaymentResult(null);
+                      onStatusChange();
+                    }}
+                    className="w-full"
+                  >
+                    Selesai
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
           </DialogContent>
         </Dialog>
       </SheetContent>

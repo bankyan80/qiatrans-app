@@ -272,7 +272,7 @@ function VehicleCard({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: index * 0.05, ease: 'easeOut' }}
+      transition={{ duration: 0.3, delay: index * 0.05, ease: 'easeOut' as const }}
       className="group"
     >
       <Card className="overflow-hidden hover:shadow-lg transition-shadow duration-200">
@@ -486,7 +486,7 @@ function VehicleFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{isEditing ? 'Edit Kendaraan' : 'Tambah Kendaraan Baru'}</DialogTitle>
           <DialogDescription>
@@ -496,7 +496,8 @@ function VehicleFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+        <div className="flex-1 min-h-0 overflow-y-auto -mx-6 px-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
           {/* Merk */}
           <div className="space-y-1.5">
             <Label htmlFor="brand">Merk <span className="text-destructive">*</span></Label>
@@ -713,6 +714,7 @@ function VehicleFormDialog({
               rows={3}
             />
           </div>
+        </div>
         </div>
 
         <DialogFooter>
