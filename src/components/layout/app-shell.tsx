@@ -77,13 +77,16 @@ import { DriversView } from '@/components/views/drivers-view';
 
 // ── Menu configuration ──────────────────────────────────────────────
 
+type UserRole = 'OWNER' | 'ADMIN' | 'DRIVER' | 'CUSTOMER' | null;
+
 interface MenuItem {
   label: string;
   view: ViewName;
   icon: React.ElementType;
 }
 
-const sidebarMenuItems: MenuItem[] = [
+// Admin/Owner: full access
+const adminMenuItems: MenuItem[] = [
   { label: 'Dashboard', view: 'dashboard', icon: LayoutDashboard },
   { label: 'Booking', view: 'booking', icon: CalendarCheck },
   { label: 'Armada', view: 'fleet', icon: Car },
@@ -91,7 +94,7 @@ const sidebarMenuItems: MenuItem[] = [
   { label: 'Akun', view: 'account', icon: UserCircle },
 ];
 
-const sidebarSecondaryItems: MenuItem[] = [
+const adminSecondaryItems: MenuItem[] = [
   { label: 'Driver', view: 'drivers', icon: UserCog },
   { label: 'Pelanggan', view: 'customers', icon: Users },
   { label: 'Tracking', view: 'tracking', icon: MapPin },
@@ -99,13 +102,57 @@ const sidebarSecondaryItems: MenuItem[] = [
   { label: 'Pengaturan', view: 'settings', icon: Settings },
 ];
 
-const bottomNavItems: MenuItem[] = [
+// Customer: limited
+const customerMenuItems: MenuItem[] = [
+  { label: 'Beranda', view: 'dashboard', icon: LayoutDashboard },
+  { label: 'Booking', view: 'booking', icon: CalendarCheck },
+  { label: 'Tracking', view: 'tracking', icon: MapPin },
+  { label: 'Akun', view: 'account', icon: UserCircle },
+];
+
+// Driver: limited
+const driverMenuItems: MenuItem[] = [
+  { label: 'Beranda', view: 'dashboard', icon: LayoutDashboard },
+  { label: 'Booking', view: 'booking', icon: CalendarCheck },
+  { label: 'Tracking', view: 'tracking', icon: MapPin },
+  { label: 'Akun', view: 'account', icon: UserCircle },
+];
+
+// Bottom nav per role
+const adminBottomNav: MenuItem[] = [
   { label: 'Beranda', view: 'dashboard', icon: Home },
   { label: 'Booking', view: 'booking', icon: CalendarCheck },
   { label: 'Armada', view: 'fleet', icon: Car },
   { label: 'Keuangan', view: 'finance', icon: Wallet },
   { label: 'Akun', view: 'account', icon: UserCircle },
 ];
+
+const customerBottomNav: MenuItem[] = [
+  { label: 'Beranda', view: 'dashboard', icon: Home },
+  { label: 'Booking', view: 'booking', icon: CalendarCheck },
+  { label: 'Tracking', view: 'tracking', icon: MapPin },
+  { label: 'Akun', view: 'account', icon: UserCircle },
+];
+
+const driverBottomNav: MenuItem[] = [
+  { label: 'Beranda', view: 'dashboard', icon: Home },
+  { label: 'Booking', view: 'booking', icon: CalendarCheck },
+  { label: 'Tracking', view: 'tracking', icon: MapPin },
+  { label: 'Akun', view: 'account', icon: UserCircle },
+];
+
+function getMenuByRole(role: UserRole) {
+  if (role === 'OWNER' || role === 'ADMIN') {
+    return { primary: adminMenuItems, secondary: adminSecondaryItems, bottom: adminBottomNav };
+  }
+  if (role === 'CUSTOMER') {
+    return { primary: customerMenuItems, secondary: [], bottom: customerBottomNav };
+  }
+  if (role === 'DRIVER') {
+    return { primary: driverMenuItems, secondary: [], bottom: driverBottomNav };
+  }
+  return { primary: [], secondary: [], bottom: [] };
+}
 
 // ── Placeholder view ────────────────────────────────────────────────
 
@@ -173,12 +220,20 @@ function NotificationIcon({ type }: { type: string }) {
 
 // ── Sidebar content (reused in Sheet on mobile) ─────────────────────
 
-function SidebarContent({ onSelectView, onCloseMobile }: { onSelectView: (v: ViewName) => void; onCloseMobile?: () => void }) {
+function SidebarContent({ role, onSelectView, onCloseMobile }: { role: UserRole; onSelectView: (v: ViewName) => void; onCloseMobile?: () => void }) {
   const currentView = useAppStore((s) => s.currentView);
+  const { primary, secondary } = getMenuByRole(role);
 
   const handleSelect = (view: ViewName) => {
     onSelectView(view);
     onCloseMobile?.();
+  };
+
+  const roleLabels: Record<string, string> = {
+    OWNER: 'Pemilik',
+    ADMIN: 'Admin',
+    DRIVER: 'Driver',
+    CUSTOMER: 'Pelanggan',
   };
 
   return (
@@ -204,7 +259,7 @@ function SidebarContent({ onSelectView, onCloseMobile }: { onSelectView: (v: Vie
           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-3 mb-2">
             Menu Utama
           </p>
-          {sidebarMenuItems.map((item) => {
+          {primary.map((item) => {
             const isActive = currentView === item.view;
             return (
               <button
@@ -228,36 +283,54 @@ function SidebarContent({ onSelectView, onCloseMobile }: { onSelectView: (v: Vie
           })}
         </div>
 
-        <Separator className="my-3" />
-
-        <div className="space-y-1">
-          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-3 mb-2">
-            Lainnya
-          </p>
-          {sidebarSecondaryItems.map((item) => {
-            const isActive = currentView === item.view;
-            return (
-              <button
-                key={item.view}
-                onClick={() => handleSelect(item.view)}
-                className={`
-                  w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150
-                  ${isActive
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                  }
-                `}
-              >
-                <item.icon className="w-[18px] h-[18px] shrink-0" />
-                {item.label}
-                {isActive && (
-                  <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-70" />
-                )}
-              </button>
-            );
-          })}
-        </div>
+        {secondary.length > 0 && (
+          <>
+            <Separator className="my-3" />
+            <div className="space-y-1">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-3 mb-2">
+                Lainnya
+              </p>
+              {secondary.map((item) => {
+                const isActive = currentView === item.view;
+                return (
+                  <button
+                    key={item.view}
+                    onClick={() => handleSelect(item.view)}
+                    className={`
+                      w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150
+                      ${isActive
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                      }
+                    `}
+                  >
+                    <item.icon className="w-[18px] h-[18px] shrink-0" />
+                    {item.label}
+                    {isActive && (
+                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-70" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </ScrollArea>
+
+      {/* User role badge at bottom */}
+      {role && (
+        <div className="border-t px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+              <UserCircle className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium truncate">{roleLabels[role] || role}</p>
+              <p className="text-[10px] text-muted-foreground">Mode {roleLabels[role]}</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -298,6 +371,15 @@ export function AppShell() {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const currentUser = useAppStore((s) => s.currentUser);
+  const userRole: UserRole = currentUser?.role || null;
+  const isLoggedIn = !!currentUser;
+
+  // Redirect to dashboard if not logged in and trying to access other views
+  useEffect(() => {
+    if (!isLoggedIn && currentView !== 'dashboard') {
+      setCurrentView('dashboard');
+    }
+  }, [isLoggedIn, currentView, setCurrentView]);
 
   // Responsive detection
   useEffect(() => {
@@ -386,6 +468,7 @@ export function AppShell() {
       // ignore
     }
     logout();
+    setCurrentView('dashboard');
     setLoggingOut(false);
   };
 
@@ -410,21 +493,25 @@ export function AppShell() {
     CUSTOMER: 'Pelanggan',
   };
 
+  const { bottom: bottomNavItems } = getMenuByRole(userRole);
+
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* ─── Header ─── */}
       <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-gradient-to-r from-[#0c1a3a] via-[#122050] to-[#0c1a3a] shadow-lg shadow-blue-950/30">
         <div className="flex h-14 items-center gap-2 px-4 lg:px-6">
-          {/* Mobile menu button */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="lg:hidden shrink-0 hover:bg-white/10 text-white/80 hover:text-white"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <Menu className="w-5 h-5" />
-            <span className="sr-only">Buka menu</span>
-          </Button>
+          {/* Mobile menu button — only when logged in */}
+          {isLoggedIn && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="lg:hidden shrink-0 hover:bg-white/10 text-white/80 hover:text-white"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu className="w-5 h-5" />
+              <span className="sr-only">Buka menu</span>
+            </Button>
+          )}
 
           {/* Logo (mobile) */}
           <div className="flex items-center gap-2 lg:hidden">
@@ -458,7 +545,8 @@ export function AppShell() {
               </TooltipContent>
             </Tooltip>
 
-            {/* Notification bell */}
+            {/* Notification bell — only when logged in */}
+            {isLoggedIn && (
             <DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -519,6 +607,7 @@ export function AppShell() {
                 </ScrollArea>
               </DropdownMenuContent>
             </DropdownMenu>
+            )}
 
             {/* User avatar dropdown OR Login button */}
             {currentUser ? (
@@ -547,17 +636,19 @@ export function AppShell() {
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
-                    <DropdownMenuItem className="cursor-pointer">
+                    <DropdownMenuItem className="cursor-pointer" onClick={() => setCurrentView('account')}>
                       <UserCircle className="w-4 h-4" />
                       Profil
                     </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="cursor-pointer"
-                      onClick={() => setCurrentView('settings')}
-                    >
-                      <Settings className="w-4 h-4" />
-                      Pengaturan
-                    </DropdownMenuItem>
+                    {(userRole === 'OWNER' || userRole === 'ADMIN') && (
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        onClick={() => setCurrentView('settings')}
+                      >
+                        <Settings className="w-4 h-4" />
+                        Pengaturan
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem className="cursor-pointer" onClick={toggleTheme}>
@@ -603,15 +694,17 @@ export function AppShell() {
 
       {/* ─── Body (sidebar + content) ─── */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Desktop sidebar */}
-        <motion.aside
-          initial={false}
-          className="hidden lg:flex w-60 flex-col border-r bg-sidebar shrink-0"
-        >
-          <SidebarContent onSelectView={setCurrentView} />
-        </motion.aside>
+        {/* Desktop sidebar — only when logged in */}
+        {isLoggedIn && (
+          <motion.aside
+            initial={false}
+            className="hidden lg:flex w-60 flex-col border-r bg-sidebar shrink-0"
+          >
+            <SidebarContent role={userRole} onSelectView={setCurrentView} />
+          </motion.aside>
+        )}
 
-        {/* Mobile sidebar (Sheet) */}
+        {/* Mobile sidebar (Sheet) — only when logged in */}
         <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
           <SheetContent side="left" className="w-72 p-0">
             <SheetHeader className="sr-only">
@@ -619,6 +712,7 @@ export function AppShell() {
               <SheetDescription>Pilih halaman untuk ditampilkan</SheetDescription>
             </SheetHeader>
             <SidebarContent
+              role={userRole}
               onSelectView={setCurrentView}
               onCloseMobile={() => setSidebarOpen(false)}
             />
@@ -642,7 +736,8 @@ export function AppShell() {
         </main>
       </div>
 
-      {/* ─── Bottom nav (mobile) ─── */}
+      {/* ─── Bottom nav (mobile) — only when logged in ─── */}
+      {isLoggedIn && (
       <nav className="fixed bottom-0 inset-x-0 z-40 lg:hidden">
         <div className="glass border-t">
           <div className="flex items-center justify-around h-16 px-2 pb-[env(safe-area-inset-bottom)]">
@@ -679,9 +774,10 @@ export function AppShell() {
           </div>
         </div>
       </nav>
+      )}
 
       {/* ─── Chatbot floating button ─── */}
-      <div className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-50">
+      <div className={`fixed ${isLoggedIn ? 'bottom-20 right-4 lg:bottom-6' : 'bottom-6 right-6'} z-50`}>
         <AnimatePresence>
           {!isChatOpen && (
             <motion.button
@@ -708,7 +804,7 @@ export function AppShell() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-50 w-[calc(100vw-2rem)] sm:w-96 h-[28rem] rounded-2xl border bg-card shadow-2xl flex flex-col overflow-hidden"
+            className={`fixed ${isLoggedIn ? 'bottom-20 right-4 lg:bottom-6' : 'bottom-6 right-6'} z-50 w-[calc(100vw-2rem)] sm:w-96 h-[28rem] rounded-2xl border bg-card shadow-2xl flex flex-col overflow-hidden`}
           >
             {/* Chat header */}
             <div className="flex items-center justify-between px-4 py-3 border-b bg-primary text-primary-foreground">
@@ -864,10 +960,22 @@ export function AppShell() {
                 <><span>Masuk</span><ArrowRight className="w-4 h-4 ml-2" /></>
               )}
             </Button>
-            <div className="p-3 rounded-lg bg-muted/50 border text-center">
-              <p className="text-[11px] text-muted-foreground">
-                <span className="font-medium">Admin:</span> admin@qiatrans.id
-              </p>
+            <div className="grid grid-cols-1 gap-1.5">
+              <div className="p-2.5 rounded-lg bg-muted/50 border text-center">
+                <p className="text-[10px] text-muted-foreground">
+                  <span className="font-medium">Admin:</span> admin@qiatrans.id / admin123
+                </p>
+              </div>
+              <div className="p-2.5 rounded-lg bg-muted/50 border text-center">
+                <p className="text-[10px] text-muted-foreground">
+                  <span className="font-medium">Customer:</span> customer@qiatrans.id / customer123
+                </p>
+              </div>
+              <div className="p-2.5 rounded-lg bg-muted/50 border text-center">
+                <p className="text-[10px] text-muted-foreground">
+                  <span className="font-medium">Driver:</span> driver1@qiatrans.id / driver123
+                </p>
+              </div>
             </div>
           </div>
         </DialogContent>
