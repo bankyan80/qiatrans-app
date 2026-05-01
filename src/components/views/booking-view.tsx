@@ -1067,6 +1067,9 @@ function BookingDetailSheet({
   onStatusChange: () => void;
 }) {
   const [updating, setUpdating] = useState(false);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [payForm, setPayForm] = useState({ amount: '', method: 'CASH' as PaymentMethod, isDownPayment: true });
+  const [payLoading, setPayLoading] = useState(false);
 
   if (!booking) return null;
 
@@ -1110,6 +1113,46 @@ function BookingDetailSheet({
   const canStart = booking.status === 'CONFIRMED';
   const canComplete = booking.status === 'ACTIVE';
   const canCancel = booking.status !== 'COMPLETED' && booking.status !== 'CANCELLED';
+  const remaining = booking.totalPrice - totalPaid;
+
+  async function handleAddPayment() {
+    const amount = parseFloat(payForm.amount);
+    if (!amount || amount <= 0) {
+      toast.error('Masukkan nominal pembayaran');
+      return;
+    }
+    if (amount > remaining) {
+      toast.error(`Nominal melebihi sisa ${formatRupiah(remaining)}`);
+      return;
+    }
+    setPayLoading(true);
+    try {
+      const res = await fetch('/api/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookingId: booking.id,
+          amount,
+          method: payForm.method,
+          isDownPayment: payForm.isDownPayment,
+          status: 'SUCCESS',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('Pembayaran berhasil dicatat!');
+        setPaymentDialogOpen(false);
+        setPayForm({ amount: '', method: 'CASH', isDownPayment: true });
+        onStatusChange(); // refresh booking data
+      } else {
+        toast.error(data.error || 'Gagal mencatat pembayaran');
+      }
+    } catch {
+      toast.error('Terjadi kesalahan');
+    } finally {
+      setPayLoading(false);
+    }
+  }
 
   // Status timeline
   const statusFlow: Array<{ status: BookingStatus; label: string; done: boolean; current: boolean }> = [
@@ -1318,7 +1361,20 @@ function BookingDetailSheet({
                 <Separator />
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">Status Pembayaran</span>
-                  <PaymentBadge status={paymentStatus} />
+                  <div className="flex items-center gap-2">
+                    <PaymentBadge status={paymentStatus} />
+                    {paymentStatus !== 'SUCCESS' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs gap-1"
+                        onClick={() => setPaymentDialogOpen(true)}
+                      >
+                        <Plus className="w-3 h-3" />
+                        Bayar
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Payment history */}
@@ -1424,6 +1480,66 @@ function BookingDetailSheet({
             </div>
           </div>
         )}
+
+        {/* Add Payment Dialog */}
+        <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-primary" />
+                Catat Pembayaran
+              </DialogTitle>
+              <DialogDescription>
+                Sisa pembayaran: {formatRupiah(remaining)}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="pay-amount">Nominal</Label>
+                <Input
+                  id="pay-amount"
+                  type="number"
+                  placeholder={formatRupiah(remaining)}
+                  value={payForm.amount}
+                  onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pay-method">Metode Pembayaran</Label>
+                <Select
+                  value={payForm.method}
+                  onValueChange={(val) => setPayForm((f) => ({ ...f, method: val as PaymentMethod }))}
+                >
+                  <SelectTrigger id="pay-method">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CASH">Tunai</SelectItem>
+                    <SelectItem value="BANK_TRANSFER">Transfer Bank</SelectItem>
+                    <SelectItem value="QRIS">QRIS</SelectItem>
+                    <SelectItem value="E_WALLET">E-Wallet</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="pay-dp">Uang Muka (DP)</Label>
+                <Switch
+                  id="pay-dp"
+                  checked={payForm.isDownPayment}
+                  onCheckedChange={(checked) => setPayForm((f) => ({ ...f, isDownPayment: checked }))}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPaymentDialogOpen(false)} disabled={payLoading}>
+                Batal
+              </Button>
+              <Button onClick={handleAddPayment} disabled={!payForm.amount || payLoading}>
+                {payLoading ? 'Menyimpan...' : 'Simpan Pembayaran'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </SheetContent>
     </Sheet>
   );
