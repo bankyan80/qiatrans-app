@@ -5,7 +5,6 @@ import { motion } from 'framer-motion';
 import {
   Car,
   CalendarCheck,
-  Wallet,
   RefreshCw,
   TrendingUp,
   AlertTriangle,
@@ -371,10 +370,9 @@ export function DashboardView() {
       {!error && (
         <>
           {/* ─── Section 1: Quick Stats ─── */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 lg:gap-4">
             {loading ? (
               <>
-                <StatCardSkeleton />
                 <StatCardSkeleton />
                 <StatCardSkeleton />
                 <StatCardSkeleton />
@@ -410,16 +408,6 @@ export function DashboardView() {
                   trend={pendingBookings > 0 ? `${pendingBookings} menunggu konfirmasi` : undefined}
                   trendUp={pendingBookings === 0}
                   delay={2}
-                />
-                <StatCard
-                  title="Pendapatan Hari Ini"
-                  value={formatCurrency(dailyRevenue)}
-                  icon={Wallet}
-                  iconBg="bg-green-100 dark:bg-green-900/30"
-                  iconColor="text-green-600 dark:text-green-400"
-                  trend="minggu ini Rp 13,4 jt"
-                  trendUp={true}
-                  delay={3}
                 />
               </>
             )}
