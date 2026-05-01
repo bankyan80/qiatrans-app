@@ -644,7 +644,7 @@ function CreateBookingDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CalendarPlus className="w-5 h-5 text-primary" />
@@ -655,7 +655,7 @@ function CreateBookingDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 -mx-6 px-6">
+        <div className="flex-1 min-h-0 -mx-6 px-6 overflow-y-auto">
           <div className="space-y-5 py-2">
             {/* Customer select / New customer form */}
             <div className="space-y-2">
@@ -1038,7 +1038,7 @@ function CreateBookingDialog({
               </motion.div>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
         <DialogFooter className="pt-4 border-t">
           <Button variant="outline" onClick={resetAndClose} disabled={loading}>
@@ -1370,7 +1370,7 @@ function BookingDetailSheet({
               Dibuat: {formatDateIndonesian(booking.createdAt)}
             </p>
           </div>
-        </div>
+        </ScrollArea>
 
         {/* Action buttons */}
         {(canConfirm || canStart || canComplete || canCancel) && (
