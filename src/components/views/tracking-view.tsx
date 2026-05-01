@@ -14,9 +14,10 @@ import {
   Maximize2,
   RefreshCw,
   Eye,
-  Crosshair,
   ZoomIn,
   ZoomOut,
+  Satellite,
+  Map as MapIcon,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -53,8 +54,8 @@ interface VehicleBasic {
 
 interface SimulatedVehicle {
   vehicle: VehicleBasic;
-  x: number;
-  y: number;
+  lat: number;
+  lng: number;
   speed: number;
   heading: number;
   status: 'moving' | 'parked' | 'offline';
@@ -103,31 +104,46 @@ const MOCK_LOCATIONS = [
 
 const MOCK_DRIVERS = ['Pak Joko', 'Mas Andi', 'Pak Budi', 'Mas Dimas', null, null];
 
+// Mock vehicle positions around Jakarta area (real coordinates)
 const MOCK_VEHICLES: SimulatedVehicle[] = [
   {
     vehicle: { id: 'v1', brand: 'Toyota', model: 'Avanza', plateNumber: 'B 1234 ABC', status: 'RENTED', year: 2023, color: 'Silver', category: 'MPV' },
-    x: 35, y: 28, speed: 45, heading: 90, status: 'moving',
+    lat: -6.2088, lng: 106.8456, speed: 45, heading: 90, status: 'moving',
     location: 'Jl. Sudirman No. 45, Jakarta Pusat',
     lastUpdate: '2 menit lalu', driverName: 'Pak Joko', estimatedReturn: '28 Apr 2026',
   },
   {
     vehicle: { id: 'v2', brand: 'Honda', model: 'HR-V', plateNumber: 'B 5678 DEF', status: 'RENTED', year: 2024, color: 'Putih', category: 'SUV' },
-    x: 60, y: 42, speed: 0, heading: 0, status: 'parked',
+    lat: -6.2277, lng: 106.8125, speed: 0, heading: 0, status: 'parked',
     location: 'Jl. Gatot Subroto Kav. 36, Jakarta Selatan',
     lastUpdate: '15 menit lalu', driverName: null, estimatedReturn: '29 Apr 2026',
   },
   {
     vehicle: { id: 'v3', brand: 'Toyota', model: 'Innova', plateNumber: 'B 9012 GHI', status: 'RENTED', year: 2023, color: 'Hitam', category: 'MPV' },
-    x: 22, y: 65, speed: 60, heading: 180, status: 'moving',
+    lat: -6.1947, lng: 106.8229, speed: 60, heading: 180, status: 'moving',
     location: 'Jl. Thamrin No. 10, Jakarta Pusat',
     lastUpdate: '1 menit lalu', driverName: 'Mas Andi', estimatedReturn: '27 Apr 2026',
   },
   {
     vehicle: { id: 'v4', brand: 'Suzuki', model: 'Ertiga', plateNumber: 'D 3456 JKL', status: 'RENTED', year: 2022, color: 'Merah', category: 'MPV' },
-    x: 78, y: 18, speed: 0, heading: 270, status: 'offline',
+    lat: -6.2349, lng: 106.8321, speed: 0, heading: 270, status: 'offline',
     location: 'Jl. Rasuna Said Blok X-2, Jakarta Selatan',
     lastUpdate: '2 jam lalu', driverName: 'Pak Budi', estimatedReturn: '30 Apr 2026',
   },
+];
+
+// Real-ish positions around Jakarta for additional vehicles
+const JAKARTA_COORDS = [
+  { lat: -6.1753, lng: 106.8272 },
+  { lat: -6.2000, lng: 106.8160 },
+  { lat: -6.2400, lng: 106.7980 },
+  { lat: -6.1520, lng: 106.8450 },
+  { lat: -6.2100, lng: 106.8550 },
+  { lat: -6.2600, lng: 106.8100 },
+  { lat: -6.1850, lng: 106.8350 },
+  { lat: -6.2250, lng: 106.8400 },
+  { lat: -6.1950, lng: 106.8050 },
+  { lat: -6.2450, lng: 106.8250 },
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -147,268 +163,216 @@ const STATUS_CONFIG = {
   offline: { label: 'Offline', color: 'bg-red-500', badgeStyle: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border-red-200 dark:border-red-800' },
 } as const;
 
-// ── Simulated Map Component ──────────────────────────────────────────
+// ── Real Map Component (Leaflet) ─────────────────────────────────────
 
-function SimulatedMap({
+function MapWrapper({
   vehicles,
   selectedId,
   onSelectVehicle,
-  zoom,
-  onZoomChange,
+  satelliteView,
 }: {
   vehicles: SimulatedVehicle[];
   selectedId: string | null;
   onSelectVehicle: (id: string) => void;
-  zoom: number;
-  onZoomChange: (z: number) => void;
+  satelliteView: boolean;
 }) {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const [mapCenter, setMapCenter] = useState({ x: 50, y: 50 });
+  const [mapInstance, setMapInstance] = useState<any>(null);
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  const [tileLayer, setTileLayer] = useState<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!mapRef.current) return;
-    const rect = mapRef.current.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-    setMapCenter({ x, y });
-  };
+  // Dynamically import Leaflet (only on client)
+  useEffect(() => {
+    import('leaflet').then((L) => {
+      setLeafletLoaded(true);
 
-  const gridLines = useMemo(() => {
-    const lines: Array<{ x1: number; y1: number; x2: number; y2: number; type: 'major' | 'minor' }> = [];
-    // Vertical lines
-    for (let i = 0; i <= 100; i += (i % 20 === 0 ? 20 : 10)) {
-      lines.push({ x1: i, y1: 0, x2: i, y2: 100, type: i % 20 === 0 ? 'major' : 'minor' });
-    }
-    // Horizontal lines
-    for (let i = 0; i <= 100; i += (i % 20 === 0 ? 20 : 10)) {
-      lines.push({ x1: 0, y1: i, x2: 100, y2: i, type: i % 20 === 0 ? 'major' : 'minor' });
-    }
-    return lines;
+      // Fix default marker icon issue
+      delete (L.Icon.Default.prototype as any)._getIconUrl;
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+      });
+    });
   }, []);
 
-  // Simulated road names
-  const roads = [
-    { x: 20, y: 50, label: 'Jl. Sudirman', vertical: true },
-    { x: 50, y: 30, label: 'Jl. Gatot Subroto', vertical: false },
-    { x: 75, y: 60, label: 'Jl. Rasuna Said', vertical: true },
-    { x: 40, y: 75, label: 'Jl. Thamrin', vertical: false },
-    { x: 10, y: 20, label: 'Jl. Asia Afrika', vertical: false },
-    { x: 85, y: 40, label: 'Jl. Kuningan', vertical: true },
-  ];
+  // Initialize map
+  useEffect(() => {
+    if (!leafletLoaded || !containerRef.current || mapInstance) return;
+
+    import('leaflet').then((L) => {
+      const map = L.map(containerRef.current!, {
+        center: [-6.2088, 106.8456],
+        zoom: 13,
+        zoomControl: false,
+        attributionControl: true,
+      });
+
+      // Add zoom control to top-left
+      L.control.zoom({ position: 'topleft' }).addTo(map);
+
+      // Add tile layer
+      const tiles = L.tileLayer(
+        'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+          maxZoom: 19,
+        }
+      ).addTo(map);
+
+      setTileLayer(tiles);
+      setMapInstance(map);
+
+      // Fix map size after mount
+      setTimeout(() => map.invalidateSize(), 100);
+    });
+
+    return () => {
+      if (mapInstance) {
+        mapInstance.remove();
+      }
+    };
+  }, [leafletLoaded]);
+
+  // Toggle satellite / normal view
+  useEffect(() => {
+    if (!mapInstance || !leafletLoaded) return;
+
+    import('leaflet').then((L) => {
+      if (tileLayer) {
+        mapInstance.removeLayer(tileLayer);
+      }
+
+      const newTileUrl = satelliteView
+        ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+      const newTiles = L.tileLayer(newTileUrl, {
+        attribution: satelliteView
+          ? '&copy; <a href="https://www.esri.com/">Esri</a>'
+          : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19,
+      }).addTo(mapInstance);
+
+      setTileLayer(newTiles);
+    });
+  }, [satelliteView, mapInstance, leafletLoaded]);
+
+  // Update markers when vehicles change
+  useEffect(() => {
+    if (!mapInstance || !leafletLoaded) return;
+
+    import('leaflet').then((L) => {
+      // Remove existing markers
+      mapInstance.eachLayer((layer: any) => {
+        if (layer instanceof L.Marker) {
+          mapInstance.removeLayer(layer);
+        }
+      });
+
+      vehicles.forEach((v) => {
+        const isSelected = v.vehicle.id === selectedId;
+        const statusCfg = STATUS_CONFIG[v.status];
+
+        // Create custom icon
+        const iconHtml = `
+          <div style="position:relative; width:${isSelected ? 40 : 32}px; height:${isSelected ? 40 : 32}px;">
+            ${v.status === 'moving' ? `<div style="position:absolute; inset:-6px; border-radius:50%; background:rgba(16,185,129,0.3); animation: pulse-ring 2s infinite;"></div>` : ''}
+            <div style="
+              width:${isSelected ? 40 : 32}px;
+              height:${isSelected ? 40 : 32}px;
+              border-radius:50%;
+              background:${statusCfg.color};
+              display:flex;
+              align-items:center;
+              justify-content:center;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+              ${isSelected ? 'border: 3px solid white; box-shadow: 0 0 0 2px rgba(255,255,255,0.3), 0 2px 8px rgba(0,0,0,0.3);' : ''}
+              transition: all 0.2s;
+            ">
+              <svg xmlns="http://www.w3.org/2000/svg" width="${isSelected ? 18 : 14}" height="${isSelected ? 18 : 14}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"/>
+                <circle cx="6.5" cy="16.5" r="2.5"/>
+                <circle cx="16.5" cy="16.5" r="2.5"/>
+              </svg>
+            </div>
+          </div>
+        `;
+
+        const customIcon = L.divIcon({
+          html: iconHtml,
+          className: 'custom-vehicle-marker',
+          iconSize: [isSelected ? 40 : 32, isSelected ? 40 : 32],
+          iconAnchor: [isSelected ? 20 : 16, isSelected ? 20 : 16],
+        });
+
+        const marker = L.marker([v.lat, v.lng], { icon: customIcon })
+          .addTo(mapInstance)
+          .on('click', () => onSelectVehicle(v.vehicle.id));
+
+        // Add popup
+        marker.bindPopup(`
+          <div style="font-family: system-ui, -apple-system, sans-serif; min-width: 180px; padding: 4px 0;">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 4px;">${v.vehicle.brand} ${v.vehicle.model}</div>
+            <div style="font-size: 11px; color: #666; margin-bottom: 6px;">${v.vehicle.plateNumber}</div>
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+              <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${statusCfg.color};"></span>
+              <span style="font-size: 11px; font-weight: 600; color:${v.status === 'moving' ? '#059669' : v.status === 'parked' ? '#d97706' : '#dc2626'}">${statusCfg.label}</span>
+              ${v.speed > 0 ? `<span style="font-size: 11px; color: #888;">${v.speed} km/h</span>` : ''}
+            </div>
+            <div style="font-size: 10px; color: #999;">${v.location}</div>
+            <div style="font-size: 10px; color: #bbb; margin-top: 2px;">Update: ${v.lastUpdate}</div>
+          </div>
+        `);
+
+        // Open popup if selected
+        if (isSelected) {
+          marker.openPopup();
+        }
+      });
+
+      // Add pulse animation style if not exists
+      if (!document.getElementById('leaflet-pulse-style')) {
+        const style = document.createElement('style');
+        style.id = 'leaflet-pulse-style';
+        style.textContent = `
+          @keyframes pulse-ring {
+            0% { transform: scale(1); opacity: 0.6; }
+            50% { transform: scale(1.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 0.6; }
+          }
+          .custom-vehicle-marker { background: none !important; border: none !important; }
+        `;
+        document.head.appendChild(style);
+      }
+    });
+  }, [vehicles, selectedId, mapInstance, leafletLoaded]);
+
+  // Invalidate size on container resize
+  useEffect(() => {
+    if (!mapInstance) return;
+    const observer = new ResizeObserver(() => {
+      mapInstance.invalidateSize();
+    });
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+    return () => observer.disconnect();
+  }, [mapInstance]);
 
   return (
-    <div className="relative w-full overflow-hidden rounded-xl border bg-slate-900" style={{ aspectRatio: '16/9' }}>
-      {/* Map background with gradient */}
-      <div
-        ref={mapRef}
-        className="absolute inset-0 cursor-crosshair"
-        onClick={handleMapClick}
-        style={{
-          background: `
-            radial-gradient(ellipse at 30% 40%, rgba(16, 185, 129, 0.08) 0%, transparent 50%),
-            radial-gradient(ellipse at 70% 60%, rgba(6, 182, 212, 0.06) 0%, transparent 50%),
-            radial-gradient(ellipse at 50% 50%, rgba(15, 23, 42, 1) 0%, rgba(15, 23, 42, 0.95) 100%)
-          `,
-        }}
-      >
-        {/* Water areas */}
-        <div className="absolute rounded-full" style={{ left: '5%', top: '60%', width: '18%', height: '25%', background: 'rgba(6, 78, 112, 0.3)', filter: 'blur(20px)' }} />
-        <div className="absolute rounded-full" style={{ right: '10%', bottom: '10%', width: '12%', height: '15%', background: 'rgba(6, 78, 112, 0.2)', filter: 'blur(15px)' }} />
+    <div className="relative w-full overflow-hidden rounded-xl border" style={{ aspectRatio: '16/9' }}>
+      <div ref={containerRef} className="absolute inset-0 z-0" />
 
-        {/* Park/green areas */}
-        <div className="absolute rounded-full" style={{ left: '60%', top: '15%', width: '14%', height: '12%', background: 'rgba(16, 185, 129, 0.1)', filter: 'blur(10px)' }} />
-        <div className="absolute rounded-full" style={{ left: '15%', top: '35%', width: '10%', height: '8%', background: 'rgba(16, 185, 129, 0.08)', filter: 'blur(8px)' }} />
-
-        {/* Grid lines - streets */}
-        {gridLines.map((line, i) => (
-          <div
-            key={i}
-            className="absolute"
-            style={{
-              left: line.type === 'vertical' ? `${line.x1}%` : '0%',
-              top: line.type === 'horizontal' ? `${line.y1}%` : '0%',
-              width: line.type === 'vertical' ? (line.type === 'major' ? '2px' : '1px') : '100%',
-              height: line.type === 'horizontal' ? (line.type === 'major' ? '2px' : '1px') : '100%',
-              background: line.type === 'major'
-                ? 'rgba(71, 85, 105, 0.5)'
-                : 'rgba(51, 65, 85, 0.25)',
-            }}
-          />
-        ))}
-
-        {/* Road labels */}
-        {roads.map((road, i) => (
-          <div
-            key={i}
-            className="absolute text-[8px] font-medium text-slate-500/50 uppercase tracking-wider whitespace-nowrap select-none"
-            style={{
-              left: road.vertical ? `${road.x + 1.5}%` : `${road.x}%`,
-              top: road.vertical ? `${road.y}%` : `${road.y + 1.5}%`,
-              writingMode: road.vertical ? 'vertical-lr' : 'horizontal-tb',
-              transform: road.vertical ? 'rotate(180deg)' : 'none',
-            }}
-          >
-            {road.label}
-          </div>
-        ))}
-
-        {/* Compass indicator */}
-        <div className="absolute top-3 right-3 w-10 h-10 rounded-full bg-slate-800/80 backdrop-blur-sm border border-slate-700/50 flex items-center justify-center">
-          <div className="relative">
-            <Crosshair className="w-5 h-5 text-cyan-400/60" />
-            <span className="absolute -top-1 left-1/2 -translate-x-1/2 text-[6px] font-bold text-red-400">N</span>
+      {/* Loading state */}
+      {!leafletLoaded && (
+        <div className="absolute inset-0 z-10 bg-slate-900 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+            <p className="text-sm text-slate-400">Memuat peta...</p>
           </div>
         </div>
-
-        {/* Scale bar */}
-        <div className="absolute bottom-3 left-3 flex items-center gap-2">
-          <div className="flex flex-col items-start">
-            <div className="h-0.5 w-16 bg-slate-500/60 relative">
-              <div className="absolute left-0 -bottom-0.5 w-px h-1.5 bg-slate-500/60" />
-              <div className="absolute right-0 -bottom-0.5 w-px h-1.5 bg-slate-500/60" />
-              <div className="absolute left-1/2 -bottom-0.5 -translate-x-1/2 w-px h-1 bg-slate-500/40" />
-            </div>
-            <span className="text-[7px] text-slate-500/60 mt-0.5">500m</span>
-          </div>
-        </div>
-
-        {/* Vehicle dots */}
-        {vehicles.map((v) => {
-          const isSelected = v.vehicle.id === selectedId;
-          const statusCfg = STATUS_CONFIG[v.status];
-          const offset = zoom * 0.5;
-
-          return (
-            <motion.div
-              key={v.vehicle.id}
-              className="absolute z-10 cursor-pointer group"
-              style={{
-                left: `${Math.max(5, Math.min(95, v.x + (mapCenter.x - 50) * (zoom - 1) * -0.3 + offset))}%`,
-                top: `${Math.max(5, Math.min(95, v.y + (mapCenter.y - 50) * (zoom - 1) * -0.3 + offset))}%`,
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelectVehicle(v.vehicle.id);
-              }}
-              animate={
-                v.status === 'moving'
-                  ? {
-                      x: [0, 3, -2, 4, -1, 0],
-                      y: [0, -2, 3, -1, 2, 0],
-                    }
-                  : {}
-              }
-              transition={
-                v.status === 'moving'
-                  ? {
-                      duration: 8 + Math.random() * 4,
-                      repeat: Infinity,
-                      ease: 'linear',
-                    }
-                  : {}
-              }
-            >
-              {/* Pulse ring for moving vehicles */}
-              {v.status === 'moving' && (
-                <motion.div
-                  className="absolute -inset-3 rounded-full"
-                  style={{ background: 'rgba(16, 185, 129, 0.2)' }}
-                  animate={{ scale: [1, 1.8, 1], opacity: [0.6, 0, 0.6] }}
-                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-                />
-              )}
-
-              {/* Main dot */}
-              <motion.div
-                className={`relative rounded-full shadow-lg ${
-                  isSelected ? 'ring-2 ring-offset-2 ring-offset-slate-900 ring-white' : ''
-                }`}
-                style={{
-                  width: isSelected ? '32px' : '24px',
-                  height: isSelected ? '32px' : '24px',
-                  background: statusCfg.color,
-                }}
-                whileHover={{ scale: 1.2 }}
-                whileTap={{ scale: 0.9 }}
-              >
-                <Car className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white" style={{ width: isSelected ? '16px' : '12px', height: isSelected ? '16px' : '12px' }} />
-              </motion.div>
-
-              {/* Label */}
-              <div
-                className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap transition-opacity ${
-                  isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                }`}
-                style={{ top: isSelected ? '38px' : '30px' }}
-              >
-                <div className="bg-slate-800/90 backdrop-blur-sm text-white text-[10px] font-medium px-2 py-1 rounded-md border border-slate-700/50 shadow-md">
-                  {v.vehicle.plateNumber}
-                  <span className="text-slate-400 ml-1">{v.speed > 0 ? `${v.speed} km/h` : ''}</span>
-                </div>
-              </div>
-
-              {/* Direction indicator for moving vehicles */}
-              {v.status === 'moving' && (
-                <div
-                  className="absolute -top-1 left-1/2 -translate-x-1/2"
-                  style={{ transform: `translateX(-50%) rotate(${v.heading}deg)` }}
-                >
-                  <Navigation className="w-2 h-2 text-emerald-300" />
-                </div>
-              )}
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {/* Zoom controls */}
-      <div className="absolute top-3 left-3 flex flex-col gap-1 z-20">
-        <Button
-          variant="secondary"
-          size="icon"
-          className="h-8 w-8 bg-slate-800/80 border-slate-700/50 hover:bg-slate-700 text-slate-300"
-          onClick={(e) => {
-            e.stopPropagation();
-            onZoomChange(Math.min(zoom + 0.2, 2));
-          }}
-        >
-          <ZoomIn className="w-4 h-4" />
-        </Button>
-        <Button
-          variant="secondary"
-          size="icon"
-          className="h-8 w-8 bg-slate-800/80 border-slate-700/50 hover:bg-slate-700 text-slate-300"
-          onClick={(e) => {
-            e.stopPropagation();
-            onZoomChange(Math.max(zoom - 0.2, 0.6));
-          }}
-        >
-          <ZoomOut className="w-4 h-4" />
-        </Button>
-      </div>
-
-      {/* Satellite toggle */}
-      <div className="absolute bottom-3 right-3 z-20">
-        <Button
-          variant="secondary"
-          size="sm"
-          className="h-7 gap-1.5 bg-slate-800/80 border-slate-700/50 hover:bg-slate-700 text-slate-300 text-[10px] px-2"
-        >
-          <Globe className="w-3 h-3" />
-          Satelit
-        </Button>
-      </div>
-
-      {/* Fullscreen hint */}
-      <div className="absolute top-3 right-14 z-20">
-        <Button
-          variant="secondary"
-          size="icon"
-          className="h-8 w-8 bg-slate-800/80 border-slate-700/50 hover:bg-slate-700 text-slate-300"
-        >
-          <Maximize2 className="w-4 h-4" />
-        </Button>
-      </div>
+      )}
     </div>
   );
 }
@@ -668,8 +632,7 @@ export function TrackingView() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [trackingData, setTrackingData] = useState<TrackingData | null>(null);
-  const [zoom, setZoom] = useState(1);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [satelliteView, setSatelliteView] = useState(false);
   const [activeVehicles, setActiveVehicles] = useState<VehicleBasic[]>([]);
 
   // ── Fetch vehicles ───────────────────────────────────────────
@@ -692,7 +655,7 @@ export function TrackingView() {
           }),
         );
 
-        // Build simulated vehicles from real data + mock positions
+        // Build simulated vehicles from real data + real Jakarta coordinates
         const simVehicles: SimulatedVehicle[] = vehicleJson.data.map((v: VehicleBasic, i: number) => {
           const result = trackingResults[i];
           let speed = 0;
@@ -721,10 +684,12 @@ export function TrackingView() {
             }
           }
 
+          const coord = JAKARTA_COORDS[i % JAKARTA_COORDS.length];
+
           return {
             vehicle: v,
-            x: 15 + (i * 17) % 75,
-            y: 15 + (i * 23) % 65,
+            lat: coord.lat + (Math.random() - 0.5) * 0.02,
+            lng: coord.lng + (Math.random() - 0.5) * 0.02,
             speed,
             heading: Math.floor(Math.random() * 360),
             status,
@@ -755,18 +720,18 @@ export function TrackingView() {
     fetchVehicles();
   }, [fetchVehicles]);
 
-  // ── Animate vehicle positions ─────────────────────────────────
+  // ── Animate vehicle positions slightly ───────────────────────
   useEffect(() => {
     const interval = setInterval(() => {
       setVehicles((prev) =>
         prev.map((v) => {
           if (v.status !== 'moving') return v;
-          const dx = (Math.random() - 0.5) * 2;
-          const dy = (Math.random() - 0.5) * 2;
+          const dlat = (Math.random() - 0.5) * 0.0005;
+          const dlng = (Math.random() - 0.5) * 0.0005;
           return {
             ...v,
-            x: Math.max(5, Math.min(95, v.x + dx)),
-            y: Math.max(5, Math.min(95, v.y + dy)),
+            lat: v.lat + dlat,
+            lng: v.lng + dlng,
             speed: Math.max(10, Math.min(80, v.speed + (Math.random() - 0.5) * 10)),
             heading: (v.heading + (Math.random() - 0.5) * 20 + 360) % 360,
           };
@@ -881,7 +846,7 @@ export function TrackingView() {
         </motion.div>
       </div>
 
-      {/* ── Simulated Map ── */}
+      {/* ── Map Container ── */}
       {loading ? (
         <MapSkeleton />
       ) : (
@@ -889,25 +854,41 @@ export function TrackingView() {
           <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.4, ease: 'easeOut' }}
-            className={isFullscreen ? 'fixed inset-0 z-50 bg-black' : ''}
+            transition={{ duration: 0.4, ease: 'easeOut' as const }}
+            className="relative"
           >
-            <SimulatedMap
+            <MapWrapper
               vehicles={vehicles}
               selectedId={selectedVehicleId}
               onSelectVehicle={handleSelectVehicle}
-              zoom={zoom}
-              onZoomChange={setZoom}
+              satelliteView={satelliteView}
             />
-            {isFullscreen && (
+
+            {/* Satellite toggle button */}
+            <div className="absolute bottom-3 right-3 z-[1000]">
               <Button
-                className="absolute top-4 right-4 z-60 bg-slate-800/90 hover:bg-slate-700 text-white"
-                onClick={() => setIsFullscreen(false)}
+                variant={satelliteView ? 'default' : 'secondary'}
+                size="sm"
+                className={`h-8 gap-1.5 shadow-lg text-xs px-3 ${
+                  satelliteView
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                    : 'bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                }`}
+                onClick={() => setSatelliteView(!satelliteView)}
               >
-                <Maximize2 className="w-4 h-4 mr-2" />
-                Keluar
+                {satelliteView ? (
+                  <>
+                    <MapIcon className="w-3.5 h-3.5" />
+                    Peta Normal
+                  </>
+                ) : (
+                  <>
+                    <Satellite className="w-3.5 h-3.5" />
+                    Satelit
+                  </>
+                )}
               </Button>
-            )}
+            </div>
           </motion.div>
 
           {fetchError && (
