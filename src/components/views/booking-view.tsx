@@ -11,6 +11,7 @@ import {
   Eye,
   Trash2,
   User,
+  UserPlus,
   Car,
   MapPin,
   Clock,
@@ -22,6 +23,7 @@ import {
   PlayCircle,
   Ban,
   RotateCcw,
+  IdCard,
 } from 'lucide-react';
 
 import { Card, CardContent } from '@/components/ui/card';
@@ -220,6 +222,13 @@ const EMPTY_FORM = {
   notes: '',
 };
 
+const EMPTY_NEW_CUSTOMER = {
+  name: '',
+  email: '',
+  phone: '',
+  idNumber: '',
+};
+
 // ── Helper functions ─────────────────────────────────────────────────
 
 function formatRupiah(amount: number): string {
@@ -339,7 +348,7 @@ function BookingCard({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
-      transition={{ duration: 0.2, ease: 'easeOut' }}
+      transition={{ duration: 0.2, ease: 'easeOut' as const }}
       layout
     >
       <Card className="overflow-hidden hover:shadow-md transition-shadow duration-200">
@@ -466,6 +475,8 @@ function CreateBookingDialog({
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [isNewCustomer, setIsNewCustomer] = useState(false);
+  const [newCustomer, setNewCustomer] = useState(EMPTY_NEW_CUSTOMER);
 
   // Fetch dropdown data when dialog opens
   useEffect(() => {
@@ -479,7 +490,7 @@ function CreateBookingDialog({
         const [custRes, vehRes, drivRes] = await Promise.all([
           fetch('/api/customers?limit=50'),
           fetch('/api/vehicles?status=AVAILABLE&limit=50'),
-          fetch('/api/drivers?status=ONLINE&limit=50'),
+          fetch('/api/drivers?limit=50'),
         ]);
 
         const [custData, vehData, drivData] = await Promise.all([
@@ -489,9 +500,26 @@ function CreateBookingDialog({
         ]);
 
         if (!cancelled) {
-          setCustomers(custData.data || []);
+          setCustomers((custData.data || []).map((c: Record<string, unknown>) => ({
+            id: c.id,
+            name: c.name,
+            email: c.email,
+            phone: c.phone,
+          })));
           setVehicles(vehData.data || []);
-          setDrivers(drivData.data || []);
+          // Drivers API returns nested user object.
+          // IMPORTANT: use user.id as driver option value because
+          // Booking.driverId is a FK to User.id (not Driver.id)
+          setDrivers((drivData.data || []).map((d: Record<string, unknown>) => {
+            const user = d.user as Record<string, unknown> | undefined;
+            return {
+              id: user?.id || d.id,
+              name: user?.name || d.name || '',
+              phone: user?.phone || d.phone || null,
+              rating: d.rating || 0,
+              status: d.status,
+            };
+          }));
         }
       } catch (err) {
         if (!cancelled) {
@@ -534,34 +562,58 @@ function CreateBookingDialog({
     return total;
   }, [selectedVehicle, calculatedDays, form.withDriver]);
 
+  const isNewCustomerValid =
+    newCustomer.name.trim() &&
+    newCustomer.phone.trim() &&
+    newCustomer.idNumber.trim();
+
   const isFormValid =
-    form.customerId &&
-    form.vehicleId &&
-    form.startDate &&
-    form.endDate &&
-    calculatedDays > 0 &&
-    form.pickupLocation;
+    !isNewCustomer
+      ? form.customerId &&
+        form.vehicleId &&
+        form.startDate &&
+        form.endDate &&
+        calculatedDays > 0 &&
+        form.pickupLocation
+      : isNewCustomerValid &&
+        form.vehicleId &&
+        form.startDate &&
+        form.endDate &&
+        calculatedDays > 0 &&
+        form.pickupLocation;
 
   async function handleSubmit() {
     if (!isFormValid) return;
 
     setLoading(true);
     try {
+      const payload: Record<string, unknown> = {
+        vehicleId: form.vehicleId,
+        driverId: form.withDriver ? form.driverId || null : null,
+        startDate: (form.startDate ?? new Date()).toISOString(),
+        endDate: (form.endDate ?? new Date()).toISOString(),
+        totalPrice: calculatedTotal,
+        withDriver: form.withDriver,
+        pickupLocation: form.pickupLocation,
+        returnLocation: form.returnLocation || null,
+        notes: form.notes || null,
+      };
+
+      if (isNewCustomer) {
+        payload.newCustomer = {
+          name: newCustomer.name.trim(),
+          email: newCustomer.email.trim() || undefined,
+          phone: newCustomer.phone.trim(),
+          idNumber: newCustomer.idNumber.trim(),
+        };
+      } else {
+        payload.customerId = form.customerId;
+      }
+
       const res = await fetch('/api/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerId: form.customerId,
-          vehicleId: form.vehicleId,
-          driverId: form.withDriver ? form.driverId || null : null,
-          startDate: form.startDate.toISOString(),
-          endDate: form.endDate.toISOString(),
-          totalPrice: calculatedTotal,
-          withDriver: form.withDriver,
-          pickupLocation: form.pickupLocation,
-          returnLocation: form.returnLocation || null,
-          notes: form.notes || null,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -569,6 +621,8 @@ function CreateBookingDialog({
       if (data.success) {
         toast.success('Booking berhasil dibuat!');
         setForm(EMPTY_FORM);
+        setNewCustomer(EMPTY_NEW_CUSTOMER);
+        setIsNewCustomer(false);
         onOpenChange(false);
         onSubmit();
       } else {
@@ -583,6 +637,8 @@ function CreateBookingDialog({
 
   function resetAndClose() {
     setForm(EMPTY_FORM);
+    setNewCustomer(EMPTY_NEW_CUSTOMER);
+    setIsNewCustomer(false);
     onOpenChange(false);
   }
 
@@ -601,29 +657,152 @@ function CreateBookingDialog({
 
         <ScrollArea className="flex-1 -mx-6 px-6">
           <div className="space-y-5 py-2">
-            {/* Customer select */}
+            {/* Customer select / New customer form */}
             <div className="space-y-2">
-              <Label htmlFor="customer">Pelanggan</Label>
-              <Select
-                value={form.customerId}
-                onValueChange={(val) => setForm((f) => ({ ...f, customerId: val }))}
-              >
-                <SelectTrigger className="w-full" id="customer">
-                  <SelectValue placeholder={fetching ? 'Memuat...' : 'Pilih pelanggan'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{c.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {c.phone || c.email}
-                        </span>
+              <div className="flex items-center justify-between">
+                <Label>Pelanggan</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs gap-1 text-primary hover:text-primary"
+                  onClick={() => {
+                    setIsNewCustomer(!isNewCustomer);
+                    if (isNewCustomer) {
+                      setNewCustomer(EMPTY_NEW_CUSTOMER);
+                    } else {
+                      setForm((f) => ({ ...f, customerId: '' }));
+                    }
+                  }}
+                >
+                  {isNewCustomer ? (
+                    <>
+                      <User className="w-3 h-3" />
+                      Pilih Pelanggan Terdaftar
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-3 h-3" />
+                      Pelanggan Baru
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              <AnimatePresence mode="wait">
+                {!isNewCustomer ? (
+                  <motion.div
+                    key="select-customer"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <Select
+                      value={form.customerId}
+                      onValueChange={(val) => setForm((f) => ({ ...f, customerId: val }))}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={fetching ? 'Memuat...' : 'Pilih pelanggan'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {customers.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{c.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {c.phone || c.email}
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="new-customer"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 p-4 space-y-3">
+                      <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                        <UserPlus className="w-4 h-4" />
+                        Data Pelanggan Baru
                       </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="new-name" className="text-xs">
+                            Nama Lengkap <span className="text-destructive">*</span>
+                          </Label>
+                          <Input
+                            id="new-name"
+                            placeholder="Nama pelanggan"
+                            value={newCustomer.name}
+                            onChange={(e) =>
+                              setNewCustomer((c) => ({ ...c, name: e.target.value }))
+                            }
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="new-phone" className="text-xs">
+                            No. Telepon <span className="text-destructive">*</span>
+                          </Label>
+                          <Input
+                            id="new-phone"
+                            placeholder="08xxxxxxxxxx"
+                            value={newCustomer.phone}
+                            onChange={(e) =>
+                              setNewCustomer((c) => ({ ...c, phone: e.target.value }))
+                            }
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="new-id" className="text-xs">
+                            No. KTP / SIM <span className="text-destructive">*</span>
+                          </Label>
+                          <div className="relative">
+                            <IdCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                              id="new-id"
+                              placeholder="Nomor identitas (KTP/SIM)"
+                              className="pl-9"
+                              value={newCustomer.idNumber}
+                              onChange={(e) =>
+                                setNewCustomer((c) => ({ ...c, idNumber: e.target.value }))
+                              }
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="new-email" className="text-xs">
+                            Email <span className="text-muted-foreground">(opsional)</span>
+                          </Label>
+                          <Input
+                            id="new-email"
+                            type="email"
+                            placeholder="email@contoh.com"
+                            value={newCustomer.email}
+                            onChange={(e) =>
+                              setNewCustomer((c) => ({ ...c, email: e.target.value }))
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-muted-foreground">
+                        Pelanggan baru akan otomatis terdaftar sebagai pelanggan rental.
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Vehicle select */}
@@ -904,6 +1083,7 @@ function BookingDetailSheet({
         : 'FAILED';
 
   async function handleStatusChange(newStatus: BookingStatus) {
+    if (!booking) return;
     setUpdating(true);
     try {
       const res = await fetch(`/api/bookings/${booking.id}`, {
@@ -1267,6 +1447,7 @@ function DeleteConfirmDialog({
   if (!booking) return null;
 
   async function handleDelete() {
+    if (!booking) return;
     setDeleting(true);
     try {
       const res = await fetch(`/api/bookings/${booking.id}`, { method: 'DELETE' });
