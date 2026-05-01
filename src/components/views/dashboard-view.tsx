@@ -670,7 +670,7 @@ export function DashboardView() {
       <motion.div variants={itemVariants} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight lg:text-3xl">
-            {mounted ? `${getGreeting()}, Admin! 👋` : 'Selamat Datang, Admin! 👋'}
+            {mounted ? `${getGreeting()}! 👋` : 'Selamat Datang! 👋'}
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">{mounted ? getIndonesianDate() : ''}</p>
         </div>
